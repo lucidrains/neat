@@ -27,7 +27,8 @@ dependencies = [
     "jaxlib",
     "jaxtyping",
     "einx>=0.3.0",
-    "einops>=0.8.1"
+    "einops>=0.8.1",
+    "equinox"
 ]
 
 [project.urls]
