@@ -26,7 +26,7 @@ dependencies = [
     "einx>=0.3.0",
     "einops>=0.8.1",
     "equinox",
-    "nimpy",
+    "nimporter",
     "jax",
     "jaxlib",
     "jaxtyping",
