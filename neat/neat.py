@@ -4,15 +4,18 @@ import einx
 from einops import rearrange
 
 import nimporter
-from neat.neat_nim import add_node, add_edge
+from neat.neat_nim import add_topology, add_node, add_edge
 
 # functions
 
-def add_neuron():
-    return add_node()
+def add_neat_topology():
+    return add_topology()
 
-def add_synapse(from_id, to_id):
-    return add_edge(from_id, to_id)
+def add_neuron(top_id):
+    return add_node(top_id)
+
+def add_synapse(top_id, from_id, to_id):
+    return add_edge(top_id, from_id, to_id)
 
 # classes
 

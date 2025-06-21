@@ -1,6 +1,11 @@
-from neat.neat import add_neuron, add_synapse
+from neat.neat import (
+    add_neat_topology,
+    add_neuron,
+    add_synapse
+)
 
 def test_add_neuron_and_synapse():
-    assert add_neuron() == 0
-    assert add_neuron() == 1
-    assert add_synapse(0, 1) == 0
+    top_id = add_neat_topology()
+    assert add_neuron(top_id) == 0
+    assert add_neuron(top_id) == 1
+    assert add_synapse(top_id, 0, 1) == 0
