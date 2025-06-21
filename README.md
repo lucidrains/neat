@@ -25,3 +25,16 @@ Explorations into NEAT and some of its derivative research
     url     = {https://api.semanticscholar.org/CorpusID:244920723}
 }
 ```
+
+```bibtex
+@article{stanley:ec02,
+    title   = {Evolving Neural Networks Through Augmenting Topologies},
+    author  = {Kenneth O. Stanley and Risto Miikkulainen},
+    volume  = {10},
+    journal = {Evolutionary Computation},
+    number  = {2},
+    pages   = {99-127},
+    url     = "http://nn.cs.utexas.edu/?stanley:ec02",
+    year    = {2002}
+}
+```
