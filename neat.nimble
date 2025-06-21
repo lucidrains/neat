@@ -9,4 +9,4 @@ license       = "MIT"
 
 requires "nim >= 2.2.4"
 requires "nimpy >= 0.2.1"
-requires "arraymancer"
+requires "arraymancer >= 0.7.33"
