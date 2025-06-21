@@ -4,7 +4,7 @@ version       = "0.0.1"
 author        = "lucidrains"
 description   = "neat"
 license       = "MIT"
-srcDir        = "src"
+srcDir        = "neat"
 installExt    = @["nim"]
 bin           = @["neat"]
 
