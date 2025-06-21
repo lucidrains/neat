@@ -21,12 +21,31 @@ type
     from_node_id: int
     to_node_id: int
 
+  MetaNode = object
+    node_id: int
+    disabled: bool
+
+  MetaEdge = object
+    edge_id: int
+    disabled: bool
+    weight: float
+
+  NeuralNetwork = ref object
+    id: int
+    topology_id: int
+    meta_nodes: seq[MetaNode] = @[]
+    meta_edges: seq[MetaEdge] = @[]
+
   Topology = ref object
     id: int
     nodes: seq[Node] = @[]
     edges: seq[Edge] = @[]
+
+    nn_id: int = 0
     node_innovation_id: int = 0
     edge_innovation_id: int = 0
+
+    population: seq[NeuralNetwork] = @[]
 
 # globals
 
@@ -86,3 +105,18 @@ proc add_edge(
 
   top.edge_innovation_id += 1
   return edge.id
+
+# main evolutionary functions
+
+# mutation and crossover
+
+proc mutate(top_id: int, nn_id: int) =
+  assert false
+
+
+proc crossover(
+  top_id: int,
+  first_parent_nn_id: int,
+  second_parent_nn_id: int
+) =
+  assert false
