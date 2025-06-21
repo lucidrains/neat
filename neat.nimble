@@ -4,10 +4,10 @@ version       = "0.0.1"
 author        = "lucidrains"
 description   = "neat"
 license       = "MIT"
-installExt    = @["nim"]
-bin           = @["neat"]
-
 
 # Dependencies
 
 requires "nim >= 2.2.4"
+requires "nimpy >= 0.2.0"
+requires "arraymancer"
+requires "malebolgia"
