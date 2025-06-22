@@ -6,6 +6,8 @@ import std/[
   math,
 ]
 
+import malebolgia
+
 # init
 
 randomize()
