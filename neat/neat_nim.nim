@@ -10,6 +10,33 @@ import std/[
 
 randomize()
 
+# activation functions
+
+proc sigmoid(x: float): float =
+  return (1.0 / (1.0 + exp(-x)))
+
+proc relu(x: float): float =
+  return max(x, 0.0)
+
+proc gauss(x: float): float =
+  return exp(-pow(x, 2))
+
+proc identity(x: float): float =
+  return x
+
+proc elu(x: float): float =
+  if x >= 0.0:
+    result = x
+  else:
+    result = exp(x) - 1.0
+
+proc clamp_one(x: float): float =
+  return max(min(x, 1.0), -1.0)
+
+type
+  Activation = enum
+    identity, sigmoid, tanh, relu, clamp, elu, gauss, sin, abs
+
 # types
 
 type
@@ -24,6 +51,7 @@ type
   MetaNode = object
     node_id: int
     disabled: bool
+    activation: Activation
 
   MetaEdge = object
     edge_id: int
@@ -51,11 +79,6 @@ type
 
 var topologies: seq[Topology] = @[]
 var topology_id = 0
-
-# activations
-
-proc sigmoid(x: float): float =
-  return (1.0 / (1.0 + exp(-x)))
 
 # functions
 
@@ -108,15 +131,29 @@ proc add_edge(
 
 # main evolutionary functions
 
+# population functions
+
+proc init_population() =
+  discard
+
+# forward
+
+proc evaluate_nn(
+  top_id: int,
+  nn_id: int,
+  inputs: seq[float]
+): seq[float] =
+
+  discard
+
 # mutation and crossover
 
 proc mutate(top_id: int, nn_id: int) =
-  assert false
-
+  discard
 
 proc crossover(
   top_id: int,
   first_parent_nn_id: int,
   second_parent_nn_id: int
 ) =
-  assert false
+  discard
