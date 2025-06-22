@@ -16,6 +16,16 @@ Explorations into NEAT and some of its derivative research
 ```
 
 ```bibtex
+@inproceedings{4665912,
+    author  = {Miguel, Cesar Gomes and Silva, Carolina Feher da and Netto, Marcio Lobo},
+    booktitle = {2008 10th Brazilian Symposium on Neural Networks},
+    title   = {Structural and Parametric Evolution of Continuous-Time Recurrent Neural Networks},
+    year    = {2008},
+    doi     = {10.1109/SBRN.2008.12}
+}
+```
+
+```bibtex
 @article{Khamesian2021HybridSN,
     title   = {Hybrid self-attention NEAT: a novel evolutionary self-attention approach to improve the NEAT algorithm in high dimensional inputs},
     author  = {Saman Khamesian and Hamed Malek},
