@@ -148,7 +148,10 @@ proc evaluate_nn(
 
 # mutation and crossover
 
-proc mutate(top_id: int, nn_id: int) =
+proc mutate(
+  top_id: int,
+  nn_id: int
+) =
   discard
 
 proc crossover(
