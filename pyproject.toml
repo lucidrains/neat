@@ -44,8 +44,10 @@ test = [
 gym = [
     "box2d-py",
     "gymnasium[box2d]>=1.0.0",
+    "gymnasium[jax]",
     "moviepy>=1.0.3",
     "numpy>=2.2.5",
+    "swig",
     "tqdm",
 ]
 
