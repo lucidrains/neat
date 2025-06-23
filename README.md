@@ -2,6 +2,8 @@
 
 Explorations into NEAT and some of its derivative research
 
+If you are a graduate student interested in this topic, you can chat with me [here](https://discord.gg/unD3QcRECw). I get the sense there's not many people working on neuro evolution
+
 ## citations
 
 ```bibtex
