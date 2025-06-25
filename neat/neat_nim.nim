@@ -135,7 +135,14 @@ proc add_edge(
 
 # population functions
 
-proc init_population() =
+proc init_population(
+  top_id: int
+) =
+  discard
+
+proc init_nn(
+  top_id: int
+) =
   discard
 
 # forward
@@ -149,6 +156,12 @@ proc evaluate_nn(
   discard
 
 # mutation and crossover
+
+proc selection(
+  top_id: int,
+  selected_nn_ids: seq[int]
+) =
+  discard
 
 proc mutate(
   top_id: int,
