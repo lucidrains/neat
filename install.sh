@@ -14,4 +14,4 @@ uv pip install '.[test]' --system
 
 # nim dep
 
-nimble install
+~/.nimble/bin/nimble install
