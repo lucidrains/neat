@@ -96,12 +96,16 @@ for _ in tqdm(range(NUM_GENERATIONS)):
         actions_to_env = np.asarray(actions.argmax(-1))
         next_state, reward, truncated, terminated, *_ = envs.step(actions_to_env)
 
-        rewards.append(reward)
-        state = next_state
+        # gymnasium should just make terminated always True if one env terminates before the other..
 
         is_done_this_step = truncated | terminated
         done = default(done, is_done_this_step)
         done |= is_done_this_step
+
+        step_reward = reward * done.astype(jnp.float32)  # insurance, in case gymnasium borks and returns rewards for terminated envs in a collection of vec envs
+
+        rewards.append(step_reward)
+        state = next_state
 
         if done.all():
             break
