@@ -95,14 +95,18 @@ def genetic_algorithm_step(
     fitnesses: Array,
     policy_weights: list[Array],
     policy_biases: list[Array],
-    top_id: int = 0
+    top_id: int = 0,
+    num_selected = 2
 ):
+    assert num_selected >= 2
+
     # todo
-    # 1. tournament
+    # 1. selection
+    # 2. tournament -> parent pairs
     # 2. compute children with crossover
-    # 3. selection + concat children
+    # 3. concat children to population
     # 4. mutation
 
-    selected_individuals, parent_indices = tournament(top_id, fitnesses)
+    selected_indices = select(top_id, fitnesses, num_selected)
 
     return policy_weights, policy_biases

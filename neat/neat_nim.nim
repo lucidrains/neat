@@ -10,6 +10,8 @@ import std/[
 
 import malebolgia
 
+import arraymancer
+
 # init
 
 randomize()
@@ -162,15 +164,22 @@ proc evaluate_nn(
 proc tournament(
   top_id: int,
   fitnesses: seq[float]
-): (seq[int], seq[(int, int)]) {.exportpy.} =
+): seq[(int, int)] {.exportpy.} =
 
-  return (@[1], @[(1, 2), (2, 3)])
+  return @[(1, 2), (2, 3)]
 
 proc select(
   top_id: int,
-  selected_nn_ids: seq[int]
-) {.exportpy.} =
-  discard
+  fitnesses: seq[float],
+  num_selected: int
+): seq[int] {.exportpy.} =
+
+  let sorted_indices = fitnesses
+    .to_tensor()
+    .argsort(order = SortOrder.Descending)
+    .to_flat_seq()
+
+  return sorted_indices[0..<num_selected]
 
 proc mutate(
   top_id: int,
