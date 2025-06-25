@@ -14,4 +14,7 @@ uv pip install '.[test]' --system
 
 # nim dep
 
-~/.nimble/bin/nimble install
+echo 'export PATH="$HOME/.nimble/bin:$PATH"' >> "$HOME/.bash_profile"
+. "$HOME/.bash_profile"
+
+nimble install
