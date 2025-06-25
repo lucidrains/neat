@@ -81,6 +81,11 @@ def mlp(
 
 # classes
 
-class GeneticAlgorithm:
-    def __init__(self):
-        raise NotImplementedError
+def genetic_algorithm_step(
+    fitnesses: Array,
+    policy_weights: list[Array],
+    policy_biases: list[Array]
+):
+    # todo - carry out neat mutation + crossover in nim
+
+    return policy_weights, policy_biases

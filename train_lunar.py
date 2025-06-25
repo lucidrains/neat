@@ -1,13 +1,26 @@
 import numpy as np
+from tqdm import tqdm
+
+import jax.numpy as jnp
 from jax.tree_util import tree_map
 
 from neat.neat import (
     init_mlp_weights_biases,
-    mlp
+    mlp,
+    genetic_algorithm_step
 )
+
+# helpers
+
+def exists(v):
+    return v is not None
+
+def default(v, d):
+    return v if exists(v) else d
 
 # constants
 
+NUM_GENERATIONS = 100
 POP_SIZE = 8
 
 # environment
@@ -63,17 +76,41 @@ def record_agent_(
 
     env.close()
 
-# policy
+# population policies
 
 dim_state = envs.observation_space.shape[-1]
 
 policy_weights, policy_biases = init_mlp_weights_biases(dim_state, 16, 16, 5, pop_dim = POP_SIZE)
 
-state, _ = envs.reset()
+# interact with environment across generations
 
-# interact
+for _ in tqdm(range(NUM_GENERATIONS)):
+    state, _ = envs.reset()
 
-actions = mlp(policy_weights, policy_biases, state)
+    rewards = []
+    done = None
+
+    while True:
+        actions = mlp(policy_weights, policy_biases, state)
+
+        actions_to_env = np.asarray(actions.argmax(-1))
+        next_state, reward, truncated, terminated, *_ = envs.step(actions_to_env)
+
+        rewards.append(reward)
+        state = next_state
+
+        is_done_this_step = truncated | terminated
+        done = default(done, is_done_this_step)
+        done |= is_done_this_step
+
+        if done.all():
+            break
+
+    rewards = jnp.stack(rewards)
+
+    fitnesses = rewards.sum(axis = 0) # cumulative rewards as fitnesses
+
+    policy_weights, policy_biases = genetic_algorithm_step(fitnesses, policy_weights, policy_biases)
 
 # test recording
 
