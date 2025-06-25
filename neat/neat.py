@@ -14,7 +14,17 @@ import einx
 from einops import einsum
 
 import nimporter
-from neat.neat_nim import add_topology, add_node, add_edge
+
+from neat.neat_nim import (
+    add_topology,
+    add_node,
+    add_edge,
+    tournament,
+    crossover,
+    select,
+    mutate,
+    evaluate_nn
+)
 
 # functions
 
@@ -84,8 +94,15 @@ def mlp(
 def genetic_algorithm_step(
     fitnesses: Array,
     policy_weights: list[Array],
-    policy_biases: list[Array]
+    policy_biases: list[Array],
+    top_id: int = 0
 ):
-    # todo - carry out neat mutation + crossover in nim
+    # todo
+    # 1. tournament
+    # 2. compute children with crossover
+    # 3. selection + concat children
+    # 4. mutation
+
+    selected_individuals, parent_indices = tournament(top_id, fitnesses)
 
     return policy_weights, policy_biases

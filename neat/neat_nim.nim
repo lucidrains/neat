@@ -4,6 +4,8 @@ import std/[
   random,
   assertions,
   math,
+  sequtils,
+  sugar
 ]
 
 import malebolgia
@@ -151,27 +153,34 @@ proc evaluate_nn(
   top_id: int,
   nn_id: int,
   inputs: seq[float]
-): seq[float] =
+): seq[float] {.exportpy.} =
 
   discard
 
 # mutation and crossover
 
-proc selection(
+proc tournament(
+  top_id: int,
+  fitnesses: seq[float]
+): (seq[int], seq[(int, int)]) {.exportpy.} =
+
+  return (@[1], @[(1, 2), (2, 3)])
+
+proc select(
   top_id: int,
   selected_nn_ids: seq[int]
-) =
+) {.exportpy.} =
   discard
 
 proc mutate(
   top_id: int,
   nn_id: int
-) =
+) {.exportpy.} =
   discard
 
 proc crossover(
   top_id: int,
   first_parent_nn_id: int,
   second_parent_nn_id: int
-) =
+) {.exportpy.} =
   discard
