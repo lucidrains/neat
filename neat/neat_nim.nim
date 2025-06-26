@@ -5,7 +5,8 @@ import std/[
   assertions,
   math,
   sequtils,
-  sugar
+  sugar,
+  algorithm
 ]
 
 import malebolgia
@@ -163,10 +164,36 @@ proc evaluate_nn(
 
 proc tournament(
   top_id: int,
-  fitnesses: seq[float]
+  fitnesses: seq[float],
+  num_tournaments: int,
+  tournament_size: int
 ): seq[(int, int)] {.exportpy.} =
 
-  return @[(1, 2), (2, 3)]
+  var gene_ids = arange(fitnesses.len).to_seq()
+
+  for _ in 0..<num_tournaments:
+
+    var
+      parent1, parent2: int = -1
+      fitness1, fitness2: float = -1e6
+
+    shuffle(gene_ids)
+    let tournament = gene_ids[0..<tournament_size]
+
+    for gene_id in tournament:
+      let gene_fitness = fitnesses[gene_id]
+
+      if gene_fitness > fitness1:
+        parent2 = parent1
+        fitness2 = fitness1
+        parent1 = gene_id
+        fitness1 = gene_fitness
+
+      elif gene_fitness > fitness2:
+        parent2 = gene_id
+        fitness2 = gene_fitness
+
+    result.add((parent1, parent2))
 
 proc select(
   top_id: int,
@@ -193,3 +220,8 @@ proc crossover(
   second_parent_nn_id: int
 ) {.exportpy.} =
   discard
+
+# quick test
+
+when is_main_module:
+  echo tournament(0, @[1.0, 3.0, 2.0, 4.0], 2, 3)
