@@ -2,7 +2,8 @@
 
 curl https://nim-lang.org/choosenim/init.sh -sSf | sh
 
-choosenim 2.2.4
+echo 'export PATH="$HOME/.nimble/bin:$PATH"' >> "$HOME/.bash_profile"
+. "$HOME/.bash_profile"
 
 # uv
 
@@ -14,7 +15,5 @@ uv pip install '.[test]' --system
 
 # nim dep
 
-echo 'export PATH="$HOME/.nimble/bin:$PATH"' >> "$HOME/.bash_profile"
-. "$HOME/.bash_profile"
-
+choosenim 2.2.4
 nimble install

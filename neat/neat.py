@@ -107,6 +107,6 @@ def genetic_algorithm_step(
     # 3. concat children to population
     # 4. mutation
 
-    selected_indices = select(top_id, fitnesses, num_selected)
+    selected_indices = select(top_id, fitnesses.tolist(), num_selected)
 
     return policy_weights, policy_biases
