@@ -18,10 +18,14 @@ def exists(v):
 def default(v, d):
     return v if exists(v) else d
 
+def divisible_by(num, den):
+    return (num % den) == 0
+
 # constants
 
 NUM_GENERATIONS = 100
 POP_SIZE = 8
+RECORD_EVERY = 5 # record every 5 generations
 
 # environment
 
@@ -39,24 +43,25 @@ envs = gym.make_vec(
 
 rmtree('./recordings', ignore_errors = True)
 
+env = gym.make(
+        "LunarLander-v3",
+        render_mode = 'rgb_array'
+)
+
+env = gym.wrappers.RecordVideo(
+    env = env,
+    video_folder = './recordings',
+    name_prefix = 'lunar-video',
+    episode_trigger = lambda eps_num: True,
+    disable_logger = True
+)
+
 def record_agent_(
     policy_index,
     policy_weights,
     policy_biases,
     seed = None
 ):
-    env = gym.make(
-        "LunarLander-v3",
-        render_mode = 'rgb_array'
-    )
-
-    env = gym.wrappers.RecordVideo(
-        env = env,
-        video_folder = './recordings',
-        name_prefix = 'lunar-video',
-        episode_trigger = lambda eps_num: True,
-        disable_logger = True
-    )
 
     single_policy_weights, single_policy_biases = tree_map(lambda t: t[policy_index], (policy_weights, policy_biases))
 
@@ -84,7 +89,7 @@ policy_weights, policy_biases = init_mlp_weights_biases(dim_state, 16, 16, 5, po
 
 # interact with environment across generations
 
-for _ in tqdm(range(NUM_GENERATIONS)):
+for gen in tqdm(range(NUM_GENERATIONS)):
     state, _ = envs.reset()
 
     rewards = []
@@ -116,6 +121,7 @@ for _ in tqdm(range(NUM_GENERATIONS)):
 
     policy_weights, policy_biases = genetic_algorithm_step(fitnesses, policy_weights, policy_biases)
 
-# test recording
+    if divisible_by(gen + 1, RECORD_EVERY):
+        record_agent_(0, policy_weights, policy_biases)
 
-record_agent_(0, policy_weights, policy_biases)
+    print(f'cumulative rewards mean: {rewards.mean():.3f} | std: {rewards.std():.3f}')
