@@ -17,6 +17,9 @@ import arraymancer
 
 randomize()
 
+proc satisfy_prob(prob: float): bool =
+  return rand(1.0) < prob
+
 # activation functions
 
 proc sigmoid(x: float): float =
@@ -75,13 +78,16 @@ type
     topology_id: int
     num_inputs: int
     num_outputs: int
-    meta_nodes: seq[MetaNode] = @[] # nodes will be always arrange [input] [output] [hiddens]
+    meta_nodes: seq[MetaNode] = @[]
     meta_edges: seq[MetaEdge] = @[]
 
   Topology = ref object
     id: int
-    nodes: seq[Node] = @[]
+    nodes: seq[Node] = @[] # nodes will be always arrange [input] [output] [hiddens]
     edges: seq[Edge] = @[]
+
+    num_inputs: int
+    num_outputs: int
 
     nn_id: int = 0
     node_innovation_id: int = 0
@@ -96,15 +102,51 @@ var topology_id = 0
 
 # functions
 
-proc add_topology(): int {.exportpy.} =
-  let topology = Topology(id: topology_id)
+proc add_node(topology_id: int, node_type: NodeType = hidden): int
+proc add_edge(topology_id: int, from_node_id: int, to_node_id: int): int
+
+proc add_topology(
+  num_inputs: int,
+  num_outputs: int
+): int {.exportpy.} =
+
+  let topology = Topology(
+    id: topology_id,
+    num_inputs: num_inputs,
+    num_outputs: num_outputs
+  )
 
   topologies.add(topology)
 
   topology_id += 1
+
+  # create input and output nodes
+
+  let
+    input_node_ids = (0..<num_inputs).to_seq
+    output_node_ids = (num_inputs..<(num_inputs + num_outputs)).to_seq
+
+
+  for _ in 0..<num_inputs:
+    discard add_node(topology.id, NodeType.input)
+
+  for _ in 0..<num_outputs:
+    discard add_node(topology.id, NodeType.output)
+
+  # create edges
+
+  for input_id in input_node_ids:
+    for output_id in output_node_ids:
+      discard add_edge(topology.id, input_id, output_id)
+
+  # return id
+
   return topology.id
 
-proc add_node(topology_id: int): int {.exportpy.} =
+proc add_node(
+  topology_id: int,
+  node_type: NodeType = hidden
+): int {.exportpy.} =
 
   let top = topologies[topology_id]
 
@@ -149,14 +191,12 @@ proc add_edge(
 
 proc init_population(
   top_id: int,
-  pop_size: int
+  pop_size: int,
 ) =
   discard
 
 proc init_nn(
   top_id: int,
-  num_inputs: int,
-  num_outputs: int
 ) =
   discard
 
@@ -259,4 +299,4 @@ proc crossover(
 # quick test
 
 when is_main_module:
-  echo tournament(0, @[1.0, 3.0, 2.0, 4.0], 2, 3)
+  discard add_topology(2, 1)

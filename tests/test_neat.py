@@ -5,7 +5,7 @@ from neat.neat import (
 )
 
 def test_add_neuron_and_synapse():
-    top_id = add_neat_topology()
+    top_id = add_neat_topology(2, 1)
     assert add_neuron(top_id) == 0
     assert add_neuron(top_id) == 1
     assert add_synapse(top_id, 0, 1) == 0

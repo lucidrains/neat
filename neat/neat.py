@@ -28,8 +28,8 @@ from neat.neat_nim import (
 
 # functions
 
-def add_neat_topology():
-    return add_topology()
+def add_neat_topology(num_inputs, num_outputs):
+    return add_topology(num_inputs, num_outputs)
 
 def add_neuron(top_id):
     return add_node(top_id)
