@@ -103,9 +103,9 @@ def genetic_algorithm_step(
     # todo
     # 1. selection
     # 2. tournament -> parent pairs
-    # 2. compute children with crossover
-    # 3. concat children to population
-    # 4. mutation
+    # 3. compute children with crossover
+    # 4. concat children to population
+    # 5. mutation
 
     selected_indices = select(top_id, fitnesses.tolist(), num_selected)
 

@@ -47,8 +47,12 @@ type
 # types
 
 type
+  NodeType = enum
+    input, output, hidden
+
   Node = object
     id: int
+    `type`: NodeType = hidden
 
   Edge = object
     id: int
@@ -58,7 +62,8 @@ type
   MetaNode = object
     node_id: int
     disabled: bool
-    activation: Activation
+    activation: Activation = tanh
+    bias: float = 0.0
 
   MetaEdge = object
     edge_id: int
@@ -68,7 +73,9 @@ type
   NeuralNetwork = ref object
     id: int
     topology_id: int
-    meta_nodes: seq[MetaNode] = @[]
+    num_inputs: int
+    num_outputs: int
+    meta_nodes: seq[MetaNode] = @[] # nodes will be always arrange [input] [output] [hiddens]
     meta_edges: seq[MetaEdge] = @[]
 
   Topology = ref object
@@ -141,12 +148,15 @@ proc add_edge(
 # population functions
 
 proc init_population(
-  top_id: int
+  top_id: int,
+  pop_size: int
 ) =
   discard
 
 proc init_nn(
-  top_id: int
+  top_id: int,
+  num_inputs: int,
+  num_outputs: int
 ) =
   discard
 
@@ -159,6 +169,26 @@ proc evaluate_nn(
 ): seq[float] {.exportpy.} =
 
   discard
+
+proc activate(act: Activation, input: float): float =
+  if act == identity:
+    return input
+  elif act == sigmoid:
+    return sigmoid(input)
+  elif act == tanh:
+    return tanh(input)
+  elif act == relu:
+    return relu(input)
+  elif act == clamp:
+    return clamp_one(input)
+  elif act == elu:
+    return elu(input)
+  elif act == gauss:
+    return gauss(input)
+  elif act == sin:
+    return sin(input)
+  elif act == abs:
+    return abs(input)
 
 # mutation and crossover
 
@@ -210,7 +240,12 @@ proc select(
 
 proc mutate(
   top_id: int,
-  nn_id: int
+  nn_id: int,
+  add_remove_edge_prob: float = 0.0,
+  add_remove_node_prob: float = 0.0,
+  change_activation_prob: float = 0.0,
+  change_edge_weight_prob: float = 0.0,
+  change_node_bias_prob: float = 0.0
 ) {.exportpy.} =
   discard
 

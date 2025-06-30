@@ -44,8 +44,8 @@ envs = gym.make_vec(
 rmtree('./recordings', ignore_errors = True)
 
 env = gym.make(
-        "LunarLander-v3",
-        render_mode = 'rgb_array'
+    "LunarLander-v3",
+    render_mode = 'rgb_array'
 )
 
 env = gym.wrappers.RecordVideo(
