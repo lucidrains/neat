@@ -93,6 +93,7 @@ type
     node_innovation_id: int = 0
     edge_innovation_id: int = 0
 
+    pop_size: int = 0
     population: seq[NeuralNetwork] = @[]
 
 # globals
@@ -189,16 +190,66 @@ proc add_edge(
 
 # population functions
 
+proc init_nn(
+  top_id: int,
+) =
+  let top = topologies[top_id]
+
+  let nn = NeuralNetwork()
+  nn.num_inputs = top.num_inputs
+  nn.num_outputs = top.num_outputs
+
+  # initialize nodes
+
+  for node_id in 0..<top.num_inputs:
+    let node = top.nodes[node_id]
+
+    let meta_node = MetaNode(
+      node_id: node.id,
+      disabled: false,
+      activation: tanh
+    )
+
+    nn.meta_nodes.add(meta_node)
+
+  for i in 0..<top.num_outputs:
+    let node_id = top.num_inputs + i
+    let node = top.nodes[node_id]
+
+    let meta_node = MetaNode(
+      node_id: node.id,
+      disabled: false,
+      activation: sigmoid
+    )
+
+    nn.meta_nodes.add(meta_node)
+
+  # create edges - start off with only fully connected from inputs to outputs
+
+  for edge_id in 0..<(top.num_inputs * top.num_outputs):
+      let edge = top.edges[edge_id]
+
+      let meta_edge = MetaEdge(
+        edge_id: edge.id,
+        disabled: false
+      )
+
+  # add neural net to population
+
+  top.population.add(nn)
+
 proc init_population(
   top_id: int,
   pop_size: int,
 ) =
-  discard
 
-proc init_nn(
-  top_id: int,
-) =
-  discard
+  let top = topologies[top_id]
+  assert top.pop_size == 0
+
+  top.pop_size = pop_size
+
+  for _ in 0..<pop_size:
+    init_nn(top_id)
 
 # forward
 
@@ -299,4 +350,6 @@ proc crossover(
 # quick test
 
 when is_main_module:
-  discard add_topology(2, 1)
+  let top_id = add_topology(2, 1)
+
+  init_population(top_id, pop_size = 8)
