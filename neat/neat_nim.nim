@@ -31,6 +31,15 @@ proc relu(x: float): float =
 proc gauss(x: float): float =
   return exp(-pow(x, 2))
 
+proc rand_normal(): float =
+  let
+    u1 = rand(1.0)
+    u2 = rand(1.0)
+
+  # box-muller
+
+  return sqrt(-2 * ln(u1)) * cos(2 * PI * u2)
+
 proc identity(x: float): float =
   return x
 
@@ -126,7 +135,6 @@ proc add_topology(
   let
     input_node_ids = (0..<num_inputs).to_seq
     output_node_ids = (num_inputs..<(num_inputs + num_outputs)).to_seq
-
 
   for _ in 0..<num_inputs:
     discard add_node(topology.id, NodeType.input)
@@ -231,8 +239,11 @@ proc init_nn(
 
       let meta_edge = MetaEdge(
         edge_id: edge.id,
-        disabled: false
+        disabled: false,
+        weight: rand_normal()
       )
+
+      nn.meta_edges.add(meta_edge)
 
   # add neural net to population
 
