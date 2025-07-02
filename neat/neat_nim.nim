@@ -17,8 +17,18 @@ import arraymancer
 
 randomize()
 
+# functions
+
 proc satisfy_prob(prob: float): bool =
   return rand(1.0) < prob
+
+proc rand_normal(): float =
+  # box-muller for random normal
+  let
+    u1 = rand(1.0)
+    u2 = rand(1.0)
+
+  return sqrt(-2 * ln(u1)) * cos(2 * PI * u2)
 
 # activation functions
 
@@ -30,15 +40,6 @@ proc relu(x: float): float =
 
 proc gauss(x: float): float =
   return exp(-pow(x, 2))
-
-proc rand_normal(): float =
-  let
-    u1 = rand(1.0)
-    u2 = rand(1.0)
-
-  # box-muller
-
-  return sqrt(-2 * ln(u1)) * cos(2 * PI * u2)
 
 proc identity(x: float): float =
   return x
@@ -71,13 +72,13 @@ type
     from_node_id: int
     to_node_id: int
 
-  MetaNode = object
+  MetaNode = ref object
     node_id: int
     disabled: bool
     activation: Activation = tanh
     bias: float = 0.0
 
-  MetaEdge = object
+  MetaEdge = ref object
     edge_id: int
     disabled: bool
     weight: float
@@ -349,7 +350,19 @@ proc mutate(
   change_edge_weight_prob: float = 0.0,
   change_node_bias_prob: float = 0.0
 ) {.exportpy.} =
-  discard
+
+  let top = topologies[top_id]
+  let nn = top.population[nn_id]
+
+  let activations = Activation.to_seq
+
+  for meta_node in nn.meta_nodes:
+
+    # mutating an activation on a node
+
+    if satisfy_prob(change_activation_prob):
+      let rand_activation_index = rand(Activation.high.ord)
+      meta_node.activation = activations[rand_activation_index]
 
 proc crossover(
   top_id: int,
@@ -364,3 +377,4 @@ when is_main_module:
   let top_id = add_topology(2, 1)
 
   init_population(top_id, pop_size = 8)
+  mutate(top_id, 0, change_activation_prob = 1.0)
