@@ -22,7 +22,7 @@ randomize()
 proc satisfy_prob(prob: float): bool =
   return rand(1.0) < prob
 
-proc rand_normal(): float =
+proc random_normal(): float =
   # box-muller for random normal
   let
     u1 = rand(1.0)
@@ -241,7 +241,7 @@ proc init_nn(
       let meta_edge = MetaEdge(
         edge_id: edge.id,
         disabled: false,
-        weight: rand_normal()
+        weight: random_normal()
       )
 
       nn.meta_edges.add(meta_edge)
@@ -348,7 +348,9 @@ proc mutate(
   add_remove_node_prob: float = 0.0,
   change_activation_prob: float = 0.0,
   change_edge_weight_prob: float = 0.0,
-  change_node_bias_prob: float = 0.0
+  change_node_bias_prob: float = 0.0,
+  perturb_weight_strength: float = 0.1,
+  perturb_bias_strength: float = 0.1
 ) {.exportpy.} =
 
   let top = topologies[top_id]
@@ -363,6 +365,13 @@ proc mutate(
     if satisfy_prob(change_activation_prob):
       let rand_activation_index = rand(Activation.high.ord)
       meta_node.activation = activations[rand_activation_index]
+
+    if satisfy_prob(change_node_bias_prob):
+      meta_node.bias += random_normal() * perturb_bias_strength
+
+  for meta_edge in nn.meta_edges:
+    if satisfy_prob(change_edge_weight_prob):
+      meta_edge.weight += random_normal() * perturb_weight_strength
 
 proc crossover(
   top_id: int,
