@@ -75,6 +75,7 @@ type
   MetaNode = ref object
     node_id: int
     disabled: bool
+    can_disable: bool
     activation: Activation = tanh
     bias: float = 0.0
 
@@ -216,6 +217,7 @@ proc init_nn(
     let meta_node = MetaNode(
       node_id: node.id,
       disabled: false,
+      can_disable: false,
       activation: tanh
     )
 
@@ -360,17 +362,30 @@ proc mutate(
 
   for meta_node in nn.meta_nodes:
 
+    # add or removing an existing node, if valid (input and output nodes are preserved)
+
+    if meta_node.can_disable and satisfy_prob(add_remove_node_prob):
+      meta_node.disabled = meta_node.disabled xor true
+
     # mutating an activation on a node
 
     if satisfy_prob(change_activation_prob):
       let rand_activation_index = rand(Activation.high.ord)
       meta_node.activation = activations[rand_activation_index]
 
-    if satisfy_prob(change_node_bias_prob):
+    if not meta_node.disabled and satisfy_prob(change_node_bias_prob):
       meta_node.bias += random_normal() * perturb_bias_strength
 
   for meta_edge in nn.meta_edges:
-    if satisfy_prob(change_edge_weight_prob):
+
+    # enabling / disabling an edge
+
+    if satisfy_prob(add_remove_edge_prob):
+      meta_edge.disabled = meta_edge.disabled xor true
+
+    # changing a weight
+
+    if not meta_edge.disabled and satisfy_prob(change_edge_weight_prob):
       meta_edge.weight += random_normal() * perturb_weight_strength
 
 proc crossover(
