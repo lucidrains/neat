@@ -44,6 +44,20 @@ proc random_normal(): float =
 
   return sqrt(-2 * ln(u1)) * cos(2 * PI * u2)
 
+# normalization
+
+proc min_max_norm(fitnesses: seq[float]): seq[float] =
+  let
+    min = fitnesses.min
+    max = fitnesses.max
+
+  let divisor = max - min
+
+  if divisor == 0.0:
+    return fitnesses
+
+  return fitnesses.map((fitness) => (fitness - min) / divisor)
+
 # activation functions
 
 proc sigmoid(x: float): float =
