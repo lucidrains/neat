@@ -289,6 +289,14 @@ proc evaluate_nn(
 
   discard
 
+proc evaluate_nn(
+  top_id: Natural,
+  nn_id: Natural,
+  inputs: seq[Tensor[float]]
+): seq[Tensor[float]] {.exportpy.} =
+
+  discard
+
 proc activate(
   act: Activation,
   input: float
