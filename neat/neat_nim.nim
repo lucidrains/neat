@@ -16,6 +16,7 @@ import arraymancer
 type
   Prob = range[0.0..1.0]
   PositiveFloat = range[0.0.. Inf]
+
 # init
 
 randomize()
@@ -46,7 +47,10 @@ proc random_normal(): float =
 
 # normalization
 
-proc min_max_norm(fitnesses: seq[float]): seq[float] =
+proc min_max_norm(
+  fitnesses: seq[float]
+): seq[float] =
+
   let
     min = fitnesses.min
     max = fitnesses.max
