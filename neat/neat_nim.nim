@@ -300,7 +300,7 @@ proc tournament(
   fitnesses: seq[float],
   num_tournaments: int,
   tournament_size: int
-): seq[(int, int)] {.exportpy.} =
+): seq[((int, float), (int, float))] {.exportpy.} =
 
   var gene_ids = arange(fitnesses.len).to_seq()
 
@@ -326,7 +326,7 @@ proc tournament(
         parent2 = gene_id
         fitness2 = gene_fitness
 
-    result.add((parent1, parent2))
+    result.add(((parent1, fitness1), (parent2, fitness2)))
 
 proc select(
   top_id: int,
@@ -376,8 +376,10 @@ proc mutate(
 proc crossover(
   top_id: int,
   first_parent_nn_id: int,
-  second_parent_nn_id: int
-) {.exportpy.} =
+  second_parent_nn_id: int,
+  first_parent_fitness: float,
+  second_parent_fitness: float
+): NeuralNetwork {.exportpy.} =
   discard
 
 # quick test
