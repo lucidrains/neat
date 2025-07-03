@@ -15,7 +15,7 @@ import arraymancer
 
 type
   Prob = range[0.0..1.0]
-
+  PositiveFloat = range[0.0.. Inf]
 # init
 
 randomize()
@@ -287,13 +287,21 @@ proc evaluate_nn(
   inputs: seq[float]
 ): seq[float] {.exportpy.} =
 
-  discard
+  let top = topologies[top_id]
+  let nn = top.population[nn_id]
+
+  assert top.num_inputs == inputs.len
 
 proc evaluate_nn(
   top_id: Natural,
   nn_id: Natural,
   inputs: seq[Tensor[float]]
 ): seq[Tensor[float]] {.exportpy.} =
+
+  let top = topologies[top_id]
+  let nn = top.population[nn_id]
+
+  assert top.num_inputs == inputs.len
 
   discard
 
@@ -419,9 +427,20 @@ proc crossover(
   first_parent_nn_id: Natural,
   second_parent_nn_id: Natural,
   first_parent_fitness: float,
-  second_parent_fitness: float
+  second_parent_fitness: float,
+  fitness_diff_is_same: PositiveFloat = 0.0
 ): NeuralNetwork {.exportpy.} =
-  discard
+
+  let fitness_difference = abs(first_parent_fitness - second_parent_fitness)
+
+  # handle disjoint / excess genes
+
+  if fitness_difference <= fitness_diff_is_same:
+    discard
+  elif first_parent_fitness < second_parent_fitness:
+    discard
+  elif second_parent_fitness > first_parent_fitness:
+    discard
 
 # quick test
 
