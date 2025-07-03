@@ -20,7 +20,16 @@ randomize()
 # functions
 
 proc satisfy_prob(prob: float): bool =
+
+  if prob == 0.0:
+    return false
+  elif prob == 1.0:
+    return true
+
   return rand(1.0) < prob
+
+proc coin_flip(): bool =
+  return satisfy_prob(0.5)
 
 proc random_normal(): float =
   # box-muller for random normal
