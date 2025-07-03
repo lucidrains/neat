@@ -13,13 +13,18 @@ import malebolgia
 
 import arraymancer
 
+type
+  Prob = range[0.0..1.0]
+
 # init
 
 randomize()
 
 # functions
 
-proc satisfy_prob(prob: float): bool =
+proc satisfy_prob(
+  prob: Prob
+): bool =
 
   if prob == 0.0:
     return false
@@ -123,8 +128,8 @@ var topology_id = 0
 
 # functions
 
-proc add_node(topology_id: int, node_type: NodeType = hidden): int
-proc add_edge(topology_id: int, from_node_id: int, to_node_id: int): int
+proc add_node(topology_id: Natural, node_type: NodeType = hidden): Natural
+proc add_edge(topology_id: Natural, from_node_id: Natural, to_node_id: Natural): Natural
 
 proc add_topology(
   num_inputs: int,
@@ -164,9 +169,9 @@ proc add_topology(
   return topology.id
 
 proc add_node(
-  topology_id: int,
+  topology_id: Natural,
   node_type: NodeType = hidden
-): int {.exportpy.} =
+): Natural {.exportpy.} =
 
   let top = topologies[topology_id]
 
@@ -179,10 +184,10 @@ proc add_node(
   return node.id
 
 proc add_edge(
-  topology_id: int,
-  from_node_id: int,
-  to_node_id: int
-): int {.exportpy.} =
+  topology_id: Natural,
+  from_node_id: Natural,
+  to_node_id: Natural
+): Natural {.exportpy.} =
 
   let top = topologies[topology_id]
 
@@ -210,7 +215,7 @@ proc add_edge(
 # population functions
 
 proc init_nn(
-  top_id: int,
+  top_id: Natural,
 ) =
   let top = topologies[top_id]
 
@@ -262,8 +267,8 @@ proc init_nn(
   top.population.add(nn)
 
 proc init_population(
-  top_id: int,
-  pop_size: int,
+  top_id: Natural,
+  pop_size: range[1..int.high],
 ) =
 
   let top = topologies[top_id]
@@ -277,14 +282,18 @@ proc init_population(
 # forward
 
 proc evaluate_nn(
-  top_id: int,
-  nn_id: int,
+  top_id: Natural,
+  nn_id: Natural,
   inputs: seq[float]
 ): seq[float] {.exportpy.} =
 
   discard
 
-proc activate(act: Activation, input: float): float =
+proc activate(
+  act: Activation,
+  input: float
+): float =
+
   if act == identity:
     return input
   elif act == sigmoid:
@@ -307,7 +316,7 @@ proc activate(act: Activation, input: float): float =
 # mutation and crossover
 
 proc tournament(
-  top_id: int,
+  top_id: Natural,
   fitnesses: seq[float],
   num_tournaments: int,
   tournament_size: int
@@ -340,9 +349,9 @@ proc tournament(
     result.add(((parent1, fitness1), (parent2, fitness2)))
 
 proc select(
-  top_id: int,
+  top_id: Natural,
   fitnesses: seq[float],
-  num_selected: int
+  num_selected: range[1..int.high]
 ): seq[int] {.exportpy.} =
 
   let sorted_indices = fitnesses
@@ -353,15 +362,15 @@ proc select(
   return sorted_indices[0..<num_selected]
 
 proc mutate(
-  top_id: int,
-  nn_id: int,
-  add_remove_edge_prob: float = 0.0,
-  add_remove_node_prob: float = 0.0,
-  change_activation_prob: float = 0.0,
-  change_edge_weight_prob: float = 0.0,
-  change_node_bias_prob: float = 0.0,
-  perturb_weight_strength: float = 0.1,
-  perturb_bias_strength: float = 0.1
+  top_id: Natural,
+  nn_id: Natural,
+  add_remove_edge_prob: Prob = 0.0,
+  add_remove_node_prob: Prob = 0.0,
+  change_activation_prob: Prob = 0.0,
+  change_edge_weight_prob: Prob = 0.0,
+  change_node_bias_prob: Prob = 0.0,
+  perturb_weight_strength: Prob = 0.1,
+  perturb_bias_strength: Prob = 0.1
 ) {.exportpy.} =
 
   let top = topologies[top_id]
@@ -398,9 +407,9 @@ proc mutate(
       meta_edge.weight += random_normal() * perturb_weight_strength
 
 proc crossover(
-  top_id: int,
-  first_parent_nn_id: int,
-  second_parent_nn_id: int,
+  top_id: Natural,
+  first_parent_nn_id: Natural,
+  second_parent_nn_id: Natural,
   first_parent_fitness: float,
   second_parent_fitness: float
 ): NeuralNetwork {.exportpy.} =
