@@ -10,6 +10,8 @@ import std/[
   algorithm
 ]
 
+import bitvector
+
 import malebolgia
 
 import arraymancer
@@ -316,8 +318,8 @@ proc evaluate_nn(
 
   let num_nodes = nn.meta_nodes.len
 
-  var visited = new_seq[bool](num_nodes)
-  var finished = new_seq[bool](num_nodes)
+  var visited = new_bit_vector[uint](num_nodes)
+  var finished = new_bit_vector[uint](num_nodes)
   var values = new_seq[float](num_nodes)
 
   # global to local node indices
@@ -342,23 +344,25 @@ proc evaluate_nn(
   # set the values of inputs
 
   for i in 0..<nn.num_inputs:
-    visited[i] = true
-    finished[i] = true
+    finished[i] = 1
 
     let activation = nn.meta_nodes[i].activation
     values[i] = activate(activation, inputs[i])
 
   # proc for fetching value of node at a given meta node index
 
-  proc compute_node_value(index: int): float =
-    if finished[index]:
+  proc compute_node_value(index: int, visited: BitVector): float =
+
+    if finished[index] == 1:
       return values[index]
 
     let meta_node = nn.meta_nodes[index]
 
     # start with bias
 
-    visited[index] = true
+    var next_visited = visited
+    next_visited[index] = 1
+
     var node_value = meta_node.bias
 
     # find all edges
@@ -376,6 +380,9 @@ proc evaluate_nn(
 
       let meta_node = nn.meta_nodes[local_from_node_id]
 
+      if next_visited[local_from_node_id] == 1:
+        continue
+
       if meta_node.disabled:
         continue
 
@@ -384,15 +391,15 @@ proc evaluate_nn(
     # get weighted sum of inputs to the node
 
     for entry in input_node_index_and_weight:
-      let (weight, index) = entry
-      node_value += weight * compute_node_value(index)
+      let (weight, local_from_node_id) = entry
+      node_value += weight * compute_node_value(local_from_node_id, next_visited)
 
     # activation
 
     let activation = meta_node.activation
     let activated_value = activate(activation, node_value)
 
-    finished[index] = true
+    finished[index] = 1
     values[index] = activated_value
 
     return activated_value
@@ -401,7 +408,7 @@ proc evaluate_nn(
 
   for i in 0..<nn.num_outputs:
     let output_index = nn.num_inputs + i
-    let output_value = compute_node_value(output_index)
+    let output_value = compute_node_value(output_index, visited)
 
     result.add(output_value)
 
