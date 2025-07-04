@@ -5,6 +5,7 @@ import std/[
   assertions,
   math,
   sequtils,
+  tables,
   sugar,
   algorithm
 ]
@@ -115,6 +116,8 @@ type
     edge_id: int
     disabled: bool
     weight: float
+    local_from_node_id: int
+    local_to_node_id: int
 
   NeuralNetwork = ref object
     id: int
@@ -148,6 +151,7 @@ var topology_id = 0
 
 proc add_node(topology_id: Natural, node_type: NodeType = hidden): Natural
 proc add_edge(topology_id: Natural, from_node_id: Natural, to_node_id: Natural): Natural
+proc activate(act: Activation, input: float): float
 
 proc add_topology(
   num_inputs: int,
@@ -250,7 +254,7 @@ proc init_nn(
       node_id: node.id,
       disabled: false,
       can_disable: false,
-      activation: tanh
+      activation: identity
     )
 
     nn.meta_nodes.add(meta_node)
@@ -310,6 +314,97 @@ proc evaluate_nn(
 
   assert top.num_inputs == inputs.len
 
+  let num_nodes = nn.meta_nodes.len
+
+  var visited = new_seq[bool](num_nodes)
+  var finished = new_seq[bool](num_nodes)
+  var values = new_seq[float](num_nodes)
+
+  # global to local node indices
+
+  var node_index = init_table[int, int]()
+
+  # global edge index to local node from and to index
+
+  var edge_index = init_table[int, (int, int)]()
+
+  for local_node_index, meta_node in nn.meta_nodes:
+    node_index[meta_node.node_id] = local_node_index
+
+  for edge in top.edges:
+    if node_index.has_key(edge.from_node_id) and node_index.has_key(edge.to_node_id):
+
+      edge_index[edge.id] = (
+        node_index[edge.from_node_id],
+        node_index[edge.to_node_id],
+      )
+
+  # set the values of inputs
+
+  for i in 0..<nn.num_inputs:
+    visited[i] = true
+    finished[i] = true
+
+    let activation = nn.meta_nodes[i].activation
+    values[i] = activate(activation, inputs[i])
+
+  # proc for fetching value of node at a given meta node index
+
+  proc compute_node_value(index: int): float =
+    if finished[index]:
+      return values[index]
+
+    let meta_node = nn.meta_nodes[index]
+
+    # start with bias
+
+    visited[index] = true
+    var node_value = meta_node.bias
+
+    # find all edges
+
+    var input_node_index_and_weight: seq[(float, int)] = @[] # omit visited
+
+    for meta_edge in nn.meta_edges:
+      if meta_edge.disabled:
+        continue
+
+      let (local_from_node_id, local_to_node_id) = edge_index[meta_edge.edge_id]
+
+      if local_to_node_id != index:
+        continue
+
+      let meta_node = nn.meta_nodes[local_from_node_id]
+
+      if meta_node.disabled:
+        continue
+
+      input_node_index_and_weight.add((meta_edge.weight, local_from_node_id))
+
+    # get weighted sum of inputs to the node
+
+    for entry in input_node_index_and_weight:
+      let (weight, index) = entry
+      node_value += weight * compute_node_value(index)
+
+    # activation
+
+    let activation = meta_node.activation
+    let activated_value = activate(activation, node_value)
+
+    finished[index] = true
+    values[index] = activated_value
+
+    return activated_value
+
+  # compute outputs
+
+  for i in 0..<nn.num_outputs:
+    let output_index = nn.num_inputs + i
+    let output_value = compute_node_value(output_index)
+
+    result.add(output_value)
+
 proc evaluate_nn(
   top_id: Natural,
   nn_id: Natural,
@@ -321,7 +416,13 @@ proc evaluate_nn(
 
   assert top.num_inputs == inputs.len
 
-  discard
+  # output starts with zeros
+
+  let one_input = inputs[0]
+  let zeros = zeros_like(one_input)
+
+  for _ in 0..<top.num_outputs:
+    result.add(zeros)
 
 proc activate(
   act: Activation,
@@ -463,7 +564,9 @@ proc crossover(
 # quick test
 
 when is_main_module:
-  let top_id = add_topology(2, 1)
+  let top_id = add_topology(4, 4)
 
   init_population(top_id, pop_size = 8)
   mutate(top_id, 0, change_activation_prob = 1.0)
+
+  echo evaluate_nn(top_id, 0, @[1.0, 1.0, 2.0, 3.0])
