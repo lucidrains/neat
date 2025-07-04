@@ -557,7 +557,46 @@ proc crossover(
   fitness_diff_is_same: PositiveFloat = 0.0
 ): NeuralNetwork {.exportpy.} =
 
+  let top = topologies[top_id]
+
+  # parents
+
+  let parent1 = top.population[first_parent_nn_id]
+  let parent2 = top.population[second_parent_nn_id]
+
+  # absolute fitness difference
+
   let fitness_difference = abs(first_parent_fitness - second_parent_fitness)
+
+  # neural network from parents one and two
+
+  let parent1_nodes = parent1.meta_nodes.filter(node => not node.disabled)
+  let parent1_edges = parent1.meta_edges.filter(edge => not edge.disabled)
+  let parent2_nodes = parent2.meta_nodes.filter(node => not node.disabled)
+  let parent2_edges = parent2.meta_edges.filter(edge => not edge.disabled)
+
+  var child_nodes: seq[MetaNode] = @[]
+  var child_edges: seq[MetaEdge] = @[]
+
+  # joint nodes / edges
+
+  for node_index in 0..< (top.num_inputs + top.num_outputs):
+
+    let rand_node = if coin_flip():
+      parent1_nodes[node_index]
+    else:
+      parent2_nodes[node_index]
+
+    child_nodes.add(rand_node)
+
+  for edge_index in 0..< (top.num_inputs * top.num_outputs):
+
+    let rand_edge = if coin_flip():
+      parent1_edges[edge_index]
+    else:
+      parent2_edges[edge_index]
+
+    child_edges.add(rand_edge)
 
   # handle disjoint / excess genes
 
@@ -568,12 +607,29 @@ proc crossover(
   elif second_parent_fitness > first_parent_fitness:
     discard
 
+  # add child to population
+
+  let nn = NeuralNetwork(
+    num_inputs: top.num_inputs,
+    num_outputs: top.num_outputs,
+    meta_nodes: child_nodes,
+    meta_edges: child_edges
+  )
+
+  top.population.add(nn)
+
+  return nn
+
 # quick test
 
 when is_main_module:
   let top_id = add_topology(4, 4)
 
-  init_population(top_id, pop_size = 8)
-  mutate(top_id, 0, change_activation_prob = 1.0)
+  init_population(top_id, pop_size = 2)
 
   echo evaluate_nn(top_id, 0, @[1.0, 1.0, 2.0, 3.0])
+  echo evaluate_nn(top_id, 1, @[1.0, 1.0, 2.0, 3.0])
+
+  discard cross_over(0, 0, 1, 1.0, 2.0)
+
+  mutate(top_id, 2, change_activation_prob = 1.0)
