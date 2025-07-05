@@ -312,8 +312,10 @@ proc init_population(
 proc evaluate_nn(
   top_id: Natural,
   nn_id: Natural,
-  inputs: seq[Tensor[float]]
-): seq[Tensor[float]] {.exportpy.} =
+  seq_inputs: seq[seq[float]]
+): seq[seq[float]] {.exportpy.} =
+
+  let inputs = seq_inputs.map(seq_float => seq_float.to_tensor)
 
   let top = topologies[top_id]
   let nn = top.population[nn_id]
@@ -420,7 +422,7 @@ proc evaluate_nn(
     let output_index = nn.num_inputs + i
     let output_value = compute_node_value(output_index, visited)
 
-    result.add(output_value)
+    result.add(output_value.to_seq)
 
 proc evaluate_nn(
   top_id: Natural,
@@ -428,7 +430,7 @@ proc evaluate_nn(
   inputs: seq[float]
 ): seq[float] {.exportpy.} =
 
-  let seq_inputs = inputs.map(value => [value].to_tensor)
+  let seq_inputs = inputs.map(value => @[value])
 
   let seq_outputs = evaluate_nn(top_id, nn_id, seq_inputs)
 
@@ -694,7 +696,7 @@ when is_main_module:
 
   init_population(top_id, pop_size = 2)
 
-  echo evaluate_nn(top_id, 0, @[@[1.0, 1.0].to_tensor, @[1.0, 1.0].to_tensor, @[2.0, 2.0].to_tensor, @[3.0, 3.0].to_tensor])
+  echo evaluate_nn(top_id, 0, @[@[1.0, 1.0], @[1.0, 1.0], @[2.0, 2.0], @[3.0, 3.0]])
   echo evaluate_nn(top_id, 0, @[1.0, 2.0, 4.0, 8.0])
 
   discard cross_over(0, 0, 1, 1.0, 2.0)
