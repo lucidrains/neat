@@ -158,6 +158,7 @@ proc add_edge(topology_id: Natural, from_node_id: Natural, to_node_id: Natural):
 
 proc activate(act: Activation, input: Tensor[float]): Tensor[float]
 proc activate(act: Activation, input: float): float
+proc activate(node: MetaNode, input: Tensor[float]): Tensor[float]
 
 proc add_topology(
   num_inputs: int,
@@ -355,8 +356,7 @@ proc evaluate_nn(
   for i in 0..<nn.num_inputs:
     finished[i] = 1
 
-    let activation = nn.meta_nodes[i].activation
-    values[i] = activate(activation, inputs[i])
+    values[i] = nn.meta_nodes[i].activate(inputs[i])
 
   # proc for fetching value of node at a given meta node index
 
@@ -408,8 +408,7 @@ proc evaluate_nn(
 
     # activation
 
-    let activation = meta_node.activation
-    let activated_value = activate(activation, node_value)
+    let activated_value = meta_node.activate(node_value)
 
     finished[index] = 1
     values[index] = activated_value
@@ -465,6 +464,13 @@ proc generate_hyper_weights(
   let meta_data = to_metadata(shape)
 
   return weights.reshape(meta_data)
+
+proc activate(
+  node: MetaNode,
+  input: Tensor[float]
+): Tensor[float] =
+
+  return activate(node.activation, input)
 
 proc activate(
   act: Activation,
