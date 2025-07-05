@@ -153,6 +153,8 @@ var topology_id = 0
 
 proc add_node(topology_id: Natural, node_type: NodeType = hidden): Natural
 proc add_edge(topology_id: Natural, from_node_id: Natural, to_node_id: Natural): Natural
+
+proc activate(act: Activation, input: Tensor[float]): Tensor[float]
 proc activate(act: Activation, input: float): float
 
 proc add_topology(
@@ -308,19 +310,22 @@ proc init_population(
 proc evaluate_nn(
   top_id: Natural,
   nn_id: Natural,
-  inputs: seq[float]
-): seq[float] {.exportpy.} =
+  inputs: seq[Tensor[float]]
+): seq[Tensor[float]] {.exportpy.} =
 
   let top = topologies[top_id]
   let nn = top.population[nn_id]
 
   assert top.num_inputs == inputs.len
 
+  let one_input = inputs[0]
+  let one_input_shape = one_input.shape
+
   let num_nodes = nn.meta_nodes.len
 
   var visited = new_bit_vector[uint](num_nodes)
   var finished = new_bit_vector[uint](num_nodes)
-  var values = new_seq[float](num_nodes)
+  var values = new_seq[Tensor[float]](num_nodes)
 
   # global to local node indices
 
@@ -351,7 +356,10 @@ proc evaluate_nn(
 
   # proc for fetching value of node at a given meta node index
 
-  proc compute_node_value(index: int, visited: BitVector): float =
+  proc compute_node_value(
+    index: int,
+    visited: BitVector
+  ): Tensor[float] =
 
     if finished[index] == 1:
       return values[index]
@@ -363,7 +371,7 @@ proc evaluate_nn(
     var next_visited = visited
     next_visited[index] = 1
 
-    var node_value = meta_node.bias
+    var node_value = zeros[float](one_input_shape) +. meta_node.bias
 
     # find all edges
 
@@ -415,21 +423,24 @@ proc evaluate_nn(
 proc evaluate_nn(
   top_id: Natural,
   nn_id: Natural,
-  inputs: seq[Tensor[float]]
-): seq[Tensor[float]] {.exportpy.} =
+  inputs: seq[float]
+): seq[float] {.exportpy.} =
 
-  let top = topologies[top_id]
-  let nn = top.population[nn_id]
+  let seq_inputs = inputs.map(value => @[value].to_tensor)
 
-  assert top.num_inputs == inputs.len
+  let seq_outputs = evaluate_nn(top_id, nn_id, seq_inputs)
 
-  # output starts with zeros
+  return seq_outputs.map(tensor => tensor[0])
 
-  let one_input = inputs[0]
-  let zeros = zeros_like(one_input)
+proc activate(
+  act: Activation,
+  input: Tensor[float]
+): Tensor[float] =
 
-  for _ in 0..<top.num_outputs:
-    result.add(zeros)
+  return input
+    .to_seq
+    .map((value) => activate(act, value))
+    .to_tensor()
 
 proc activate(
   act: Activation,
@@ -627,8 +638,8 @@ when is_main_module:
 
   init_population(top_id, pop_size = 2)
 
-  echo evaluate_nn(top_id, 0, @[1.0, 1.0, 2.0, 3.0])
-  echo evaluate_nn(top_id, 1, @[1.0, 1.0, 2.0, 3.0])
+  echo evaluate_nn(top_id, 0, @[@[1.0, 1.0].to_tensor, @[1.0, 1.0].to_tensor, @[2.0, 2.0].to_tensor, @[3.0, 3.0].to_tensor])
+  echo evaluate_nn(top_id, 0, @[1.0, 2.0, 4.0, 8.0])
 
   discard cross_over(0, 0, 1, 1.0, 2.0)
 
