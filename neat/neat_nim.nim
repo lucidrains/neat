@@ -424,7 +424,7 @@ proc evaluate_nn(
 
     result.add(output_value.to_seq)
 
-proc evaluate_nn(
+proc evaluate_nn_single(
   top_id: Natural,
   nn_id: Natural,
   inputs: seq[float]
@@ -435,6 +435,36 @@ proc evaluate_nn(
   let seq_outputs = evaluate_nn(top_id, nn_id, seq_inputs)
 
   return seq_outputs.map(tensor => tensor[0])
+
+proc generate_hyper_weights(
+  top_id: Natural,
+  nn_id: Natural,
+  shape: seq[int]
+): Tensor[float] {.exportpy.} =
+
+  let top = topologies[top_id]
+
+  assert top.num_inputs == shape.len
+
+  let
+    nn = top.population[nn_id]
+    first_axis = shape[0]
+    rest_axis = shape[1..^1]
+
+  var coors = linspace(0.0, 1.0, shape[0])
+  coors = coors.reshape(1, first_axis)
+
+  for dim in rest_axis:
+    var next_dim_coors = linspace(0.0, 1.0, dim)
+    next_dim_coors = next_dim_coors.reshape(1, 1, dim).broadcast(1, coors.shape[1], dim)
+    coors = coors.reshape(coors.shape[0], coors.shape[1], 1).broadcast(coors.shape[0], coors.shape[1], dim)
+    coors = concat(coors, next_dim_coors, axis = 0)
+    coors = coors.reshape(coors.shape[0], coors.shape[1] * coors.shape[2])
+
+  var weights = evaluate_nn(top_id, nn_id, coors.to_seq_2d).to_tensor
+  let meta_data = to_metadata(shape)
+
+  return weights.reshape(meta_data)
 
 proc activate(
   act: Activation,
@@ -692,12 +722,14 @@ proc crossover(
 # quick test
 
 when is_main_module:
-  let top_id = add_topology(4, 4)
+  let top_id = add_topology(3, 1)
 
   init_population(top_id, pop_size = 2)
 
-  echo evaluate_nn(top_id, 0, @[@[1.0, 1.0], @[1.0, 1.0], @[2.0, 2.0], @[3.0, 3.0]])
-  echo evaluate_nn(top_id, 0, @[1.0, 2.0, 4.0, 8.0])
+  discard evaluate_nn(top_id, 0, @[@[1.0, 1.0], @[1.0, 1.0], @[2.0, 2.0]])
+  discard evaluate_nn_single(top_id, 0, @[1.0, 2.0, 4.0])
+
+  let weights3d = generate_hyper_weights(top_id, 0, @[4, 2, 3])
 
   discard cross_over(0, 0, 1, 1.0, 2.0)
 
