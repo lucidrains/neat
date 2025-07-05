@@ -426,7 +426,7 @@ proc evaluate_nn(
   inputs: seq[float]
 ): seq[float] {.exportpy.} =
 
-  let seq_inputs = inputs.map(value => @[value].to_tensor)
+  let seq_inputs = inputs.map(value => [value].to_tensor)
 
   let seq_outputs = evaluate_nn(top_id, nn_id, seq_inputs)
 
@@ -437,10 +437,7 @@ proc activate(
   input: Tensor[float]
 ): Tensor[float] =
 
-  return input
-    .to_seq
-    .map((value) => activate(act, value))
-    .to_tensor()
+  return input.map(value => activate(act, value))
 
 proc activate(
   act: Activation,
