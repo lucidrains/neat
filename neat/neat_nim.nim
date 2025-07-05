@@ -5,6 +5,8 @@ import std/[
   assertions,
   math,
   sequtils,
+  sets,
+  setutils,
   tables,
   sugar,
   algorithm
@@ -576,44 +578,101 @@ proc crossover(
 
   let fitness_difference = abs(first_parent_fitness - second_parent_fitness)
 
-  # neural network from parents one and two
-
-  let parent1_nodes = parent1.meta_nodes.filter(node => not node.disabled)
-  let parent1_edges = parent1.meta_edges.filter(edge => not edge.disabled)
-  let parent2_nodes = parent2.meta_nodes.filter(node => not node.disabled)
-  let parent2_edges = parent2.meta_edges.filter(edge => not edge.disabled)
+  # child
 
   var child_nodes: seq[MetaNode] = @[]
   var child_edges: seq[MetaEdge] = @[]
 
+  # index the nodes and edges of parents 1 and 2
+
+  proc index_meta_nodes_by_global_id(
+    meta_nodes: seq[MetaNode]
+  ): Table[int, MetaNode] =
+    result = init_table[int, MetaNode]()
+
+    for meta_node in meta_nodes:
+      result[meta_node.node_id] = meta_node
+
+  proc index_meta_edges_by_global_id(
+    meta_edges: seq[MetaEdge]
+  ): Table[int, MetaEdge] =
+    result = init_table[int, MetaEdge]()
+
+    for meta_edge in meta_edges:
+      result[meta_edge.edge_id] = meta_edge
+
+  let parent1_nodes_index = index_meta_nodes_by_global_id(parent1.meta_nodes)
+  let parent2_nodes_index = index_meta_nodes_by_global_id(parent2.meta_nodes)
+
+  let parent1_edges_index = index_meta_edges_by_global_id(parent2.meta_edges)
+  let parent2_edges_index = index_meta_edges_by_global_id(parent2.meta_edges)
+
+  let parent1_node_set = parent1_nodes_index.keys.to_seq.to_hash_set
+  let parent2_node_set = parent2_nodes_index.keys.to_seq.to_hash_set
+
+  let parent1_edge_set = parent1_edges_index.keys.to_seq.to_hash_set
+  let parent2_edge_set = parent2_edges_index.keys.to_seq.to_hash_set
+
+  # handle joint
+
+  var joint_node_ids = (parent1_node_set * parent2_node_set).to_seq
+  var joint_edge_ids = (parent1_edge_set * parent2_edge_set).to_seq
+
+  joint_node_ids.sort()
+  joint_edge_ids.sort()
+
+  # handle disjoint
+  # one of the important details - the child inherits all the disjoint / excess genes from the fitter parent. seems like an advantage for in-silico evo
+
+  var
+    disjoint_nodes_index: Table[int, MetaNode]
+    disjoint_edges_index: Table[int, MetaEdge]
+    disjoint_node_ids: seq[int] = @[]
+    disjoint_edge_ids: seq[int] = @[]
+
+  if fitness_difference <= fitness_diff_is_same:
+    joint_node_ids &= (parent1_node_set -+- parent2_node_set).to_seq
+    joint_edge_ids &= (parent1_edge_set -+- parent2_edge_set).to_seq
+
+  elif first_parent_fitness < second_parent_fitness:
+    disjoint_nodes_index = parent2_nodes_index
+    disjoint_edges_index = parent2_edges_index
+    disjoint_node_ids = (parent2_node_set - parent1_node_set).to_seq
+    disjoint_edge_ids = (parent2_edge_set - parent1_edge_set).to_seq
+
+  elif second_parent_fitness > first_parent_fitness:
+    disjoint_nodes_index = parent1_nodes_index
+    disjoint_edges_index = parent1_edges_index
+    disjoint_node_ids = (parent1_node_set - parent2_node_set).to_seq
+    disjoint_edge_ids = (parent1_edge_set - parent2_edge_set).to_seq
+
   # joint nodes / edges
 
-  for node_index in 0..< (top.num_inputs + top.num_outputs):
+  for node_id in joint_node_ids:
 
     let rand_node = if coin_flip():
-      parent1_nodes[node_index]
+      parent1_nodes_index[node_id]
     else:
-      parent2_nodes[node_index]
+      parent2_nodes_index[node_id]
 
     child_nodes.add(rand_node)
 
-  for edge_index in 0..< (top.num_inputs * top.num_outputs):
+  for edge_id in joint_edge_ids:
 
     let rand_edge = if coin_flip():
-      parent1_edges[edge_index]
+      parent1_edges_index[edge_id]
     else:
-      parent2_edges[edge_index]
+      parent2_edges_index[edge_id]
 
     child_edges.add(rand_edge)
 
   # handle disjoint / excess genes
 
-  if fitness_difference <= fitness_diff_is_same:
-    discard
-  elif first_parent_fitness < second_parent_fitness:
-    discard
-  elif second_parent_fitness > first_parent_fitness:
-    discard
+  for node_id in disjoint_node_ids:
+    child_nodes.add(disjoint_nodes_index[node_id])
+
+  for edge_id in disjoint_edge_ids:
+    child_edges.add(disjoint_edges_index[edge_id])
 
   # add child to population
 
