@@ -29,6 +29,7 @@ dependencies = [
     "jax",
     "jaxlib",
     "jaxtyping",
+    "joblib"
 ]
 
 [project.urls]
