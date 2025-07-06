@@ -19,6 +19,7 @@ from neat.neat import (
     init_mlp_weights_biases,
     mlp,
     generate_hyper_weight,
+    generate_all_hyper_weights,
     add_topology,
     init_population
 )
@@ -33,5 +34,7 @@ def test_hyper():
     top_id = add_topology(2, 1)
     init_population(top_id, 10)
     weight = generate_hyper_weight(top_id, 0, (3, 5))
-
     assert weight.shape == (3, 5)
+
+    weights = generate_all_hyper_weights(top_id, 10, (3, 5))
+    assert len(weights) == 10

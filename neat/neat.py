@@ -28,6 +28,8 @@ from neat.neat_nim import (
     evaluate_nn
 )
 
+from joblib import Parallel, delayed
+
 # functions
 
 def add_neat_topology(num_inputs, num_outputs):
@@ -51,6 +53,15 @@ def generate_hyper_weight(
     seq_floats = generate_hyper_weights_nim(top_id, nn_id, shape)
 
     return jnp.array(seq_floats).reshape(shape)
+
+def generate_all_hyper_weights(
+    top_id,
+    pop_size,
+    shape: tuple[int, ...],
+    n_jobs = -1
+) -> list[Array]:
+
+    return Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(generate_hyper_weight)(top_id, nn_id, shape) for nn_id in range(pop_size))
 
 # mlp for actor
 
