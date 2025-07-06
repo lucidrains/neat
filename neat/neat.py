@@ -17,6 +17,8 @@ import nimporter
 
 from neat.neat_nim import (
     add_topology,
+    init_population as init_population_nim,
+    generate_hyper_weights as generate_hyper_weights_nim,
     add_node,
     add_edge,
     tournament,
@@ -31,6 +33,9 @@ from neat.neat_nim import (
 def add_neat_topology(num_inputs, num_outputs):
     return add_topology(num_inputs, num_outputs)
 
+def init_population(top_id, pop_size):
+    return init_population_nim(top_id, pop_size)
+
 def add_neuron(top_id):
     return add_node(top_id)
 
@@ -43,7 +48,9 @@ def generate_hyper_weight(
     shape: tuple[int, ...]
 ) -> Array:
 
-    raise NotImplementedError
+    seq_floats = generate_hyper_weights_nim(top_id, nn_id, shape)
+
+    return jnp.array(seq_floats).reshape(shape)
 
 # mlp for actor
 

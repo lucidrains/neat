@@ -298,7 +298,7 @@ proc init_nn(
 proc init_population(
   top_id: Natural,
   pop_size: range[1..int.high],
-) =
+) {.exportpy.} =
 
   let top = topologies[top_id]
   assert top.pop_size == 0
@@ -439,7 +439,7 @@ proc generate_hyper_weights(
   top_id: Natural,
   nn_id: Natural,
   shape: seq[int]
-): Tensor[float] {.exportpy.} =
+): seq[float] {.exportpy.} =
 
   let top = topologies[top_id]
 
@@ -463,7 +463,7 @@ proc generate_hyper_weights(
   var weights = evaluate_nn(top_id, nn_id, coors.to_seq_2d).to_tensor
   let meta_data = to_metadata(shape)
 
-  return weights.reshape(meta_data)
+  return weights.reshape(meta_data).to_seq
 
 proc activate(
   node: MetaNode,

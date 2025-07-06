@@ -17,7 +17,10 @@ import jax.numpy as jnp
 
 from neat.neat import (
     init_mlp_weights_biases,
-    mlp
+    mlp,
+    generate_hyper_weight,
+    add_topology,
+    init_population
 )
 
 def test_population_mlp():
@@ -25,3 +28,10 @@ def test_population_mlp():
 
     action_logits = mlp(weights, biases, jnp.zeros((8, 10)))
     assert action_logits.shape == (8, 5)
+
+def test_hyper():
+    top_id = add_topology(2, 1)
+    init_population(top_id, 10)
+    weight = generate_hyper_weight(top_id, 0, (3, 5))
+
+    assert weight.shape == (3, 5)
