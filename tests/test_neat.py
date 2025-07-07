@@ -1,14 +1,12 @@
 from neat.neat import (
-    add_neat_topology,
-    add_neuron,
-    add_synapse
+    Topology
 )
 
 def test_add_neuron_and_synapse():
-    top_id = add_neat_topology(2, 1)
-    assert add_neuron(top_id) == 3
-    assert add_neuron(top_id) == 4
-    assert add_synapse(top_id, 0, 3) == 2
+    top = Topology(2, 1)
+    assert top.add_neuron() == 3
+    assert top.add_neuron() == 4
+    assert top.add_synapse( 0, 3) == 2
 
 # mlp with population dim
 
@@ -18,10 +16,6 @@ import jax.numpy as jnp
 from neat.neat import (
     init_mlp_weights_biases,
     mlp,
-    generate_hyper_weight,
-    generate_all_hyper_weights,
-    add_topology,
-    init_population
 )
 
 def test_population_mlp():
@@ -31,10 +25,10 @@ def test_population_mlp():
     assert action_logits.shape == (8, 5)
 
 def test_hyper():
-    top_id = add_topology(2, 1)
-    init_population(top_id, 10)
-    weight = generate_hyper_weight(top_id, 0, (3, 5))
+    top = Topology(2, 1)
+    top.init_population(10)
+    weight = top.generate_hyper_weight(0, (3, 5))
     assert weight.shape == (3, 5)
 
-    weights = generate_all_hyper_weights(top_id, 10, (3, 5))
+    weights = top.generate_all_hyper_weights(10, (3, 5))
     assert len(weights) == 10

@@ -148,7 +148,7 @@ type
 
 # globals
 
-var topologies: seq[Topology] = @[]
+var topologies = init_table[int, Topology]()
 var topology_id = 0
 
 # functions
@@ -171,7 +171,7 @@ proc add_topology(
     num_outputs: num_outputs
   )
 
-  topologies.add(topology)
+  topologies[topology_id] = topology
 
   topology_id += 1
 
@@ -196,6 +196,9 @@ proc add_topology(
   # return id
 
   return topology.id
+
+proc remove_topology(topology_id: Natural) {.exportpy.} =
+  topologies.del(topology_id)
 
 proc add_node(
   topology_id: Natural,
@@ -740,3 +743,5 @@ when is_main_module:
   discard cross_over(0, 0, 1, 1.0, 2.0)
 
   mutate(top_id, 2, change_activation_prob = 1.0)
+
+  remove_topology(top_id)
