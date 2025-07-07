@@ -14,14 +14,14 @@ import jax
 import jax.numpy as jnp
 
 from neat.neat import (
-    init_mlp_weights_biases,
+    PopulationMLP,
     mlp,
 )
 
 def test_population_mlp():
-    weights, biases = init_mlp_weights_biases(10, 16, 16, 5, pop_dim = 8)
+    pop = PopulationMLP(10, 16, 16, 5, pop_size = 8)
 
-    action_logits = mlp(weights, biases, jnp.zeros((8, 10)))
+    action_logits = pop.forward(jnp.zeros((8, 10)))
     assert action_logits.shape == (8, 5)
 
 def test_hyper():
