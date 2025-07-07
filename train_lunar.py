@@ -4,11 +4,7 @@ from tqdm import tqdm
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 
-from neat.neat import (
-    init_mlp_weights_biases,
-    mlp,
-    genetic_algorithm_step
-)
+from neat.neat import PopulationMLP, mlp
 
 # helpers
 
@@ -85,7 +81,7 @@ def record_agent_(
 
 dim_state = envs.observation_space.shape[-1]
 
-policy_weights, policy_biases = init_mlp_weights_biases(dim_state, 16, 16, 5, pop_dim = POP_SIZE)
+population = PopulationMLP(dim_state, 16, 16, 5, pop_size = POP_SIZE)
 
 # interact with environment across generations
 
@@ -96,7 +92,7 @@ for gen in tqdm(range(NUM_GENERATIONS)):
     done = None
 
     while True:
-        actions = mlp(policy_weights, policy_biases, state)
+        actions = population.forward(state)
 
         actions_to_env = np.asarray(actions.argmax(-1))
         next_state, reward, truncated, terminated, *_ = envs.step(actions_to_env)
@@ -119,9 +115,9 @@ for gen in tqdm(range(NUM_GENERATIONS)):
 
     fitnesses = rewards.sum(axis = 0) # cumulative rewards as fitnesses
 
-    policy_weights, policy_biases = genetic_algorithm_step(fitnesses, policy_weights, policy_biases)
+    population.genetic_algorithm_step(fitnesses)
 
     if divisible_by(gen + 1, RECORD_EVERY):
-        record_agent_(0, policy_weights, policy_biases)
+        record_agent_(0, population.weights, population.biases)
 
     print(f'cumulative rewards mean: {rewards.mean():.3f} | std: {rewards.std():.3f}')
