@@ -760,9 +760,25 @@ proc crossover(
     meta_edges: child_edges
   )
 
-  top.population.add(nn)
-
   return nn
+
+proc crossover_and_add_to_population(
+  top_id: Natural,
+  parent_indices_and_fitnesses: seq[((int, float), (int, float))],
+  fitness_diff_is_same: PositiveFloat = 0.0
+) {.exportpy.} =
+
+  let top = topologies[top_id]
+
+  for one_pair in parent_indices_and_fitnesses:
+    let (parent1_info, parent2_info) = one_pair
+
+    let (parent1, fitness1) = parent1_info
+    let (parent2, fitness2) = parent2_info
+
+    let child = crossover(top_id, parent1, parent2, fitness1, fitness2, fitness_diff_is_same)
+
+    top.population.add(child)
 
 # quick test
 
@@ -778,6 +794,10 @@ when is_main_module:
   ) = select_and_tournament(top_id, @[1.0, 3.0, -1.0], 2, tournament_size = 2)
 
   assert topologies[top_id].population.len == 2
+
+  crossover_and_add_to_population(top_id, parent_indices_and_fitness)
+
+  assert topologies[top_id].population.len == 3
 
   discard evaluate_nn(top_id, 0, @[@[1.0, 1.0], @[1.0, 1.0], @[2.0, 2.0]])
   discard evaluate_nn_single(top_id, 0, @[1.0, 2.0, 4.0])
