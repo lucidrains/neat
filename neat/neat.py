@@ -20,11 +20,10 @@ from neat.neat_nim import (
     remove_topology,
     init_population as init_population_nim,
     generate_hyper_weights as generate_hyper_weights_nim,
+    select_and_tournament,
     add_node,
     add_edge,
-    tournament,
     crossover,
-    select,
     mutate,
     evaluate_nn
 )

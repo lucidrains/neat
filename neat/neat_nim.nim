@@ -449,7 +449,6 @@ proc generate_hyper_weights(
   assert top.num_inputs == shape.len
 
   let
-    nn = top.population[nn_id]
     first_axis = shape[0]
     rest_axis = shape[1..^1]
 
@@ -511,8 +510,8 @@ proc activate(
 proc tournament(
   top_id: Natural,
   fitnesses: seq[float],
-  num_tournaments: int,
-  tournament_size: int
+  num_tournaments: range[1..int.high],
+  tournament_size: range[2..int.high]
 ): seq[((int, float), (int, float))] {.exportpy.} =
 
   var gene_ids = arange(fitnesses.len).to_seq()
@@ -553,6 +552,43 @@ proc select(
     .to_flat_seq()
 
   return sorted_indices[0..<num_selected]
+
+proc select_and_tournament(
+  top_id: Natural,
+  fitnesses: seq[float],
+  num_selected: range[1..int.high],
+  tournament_size: range[2..int.high]
+): (
+  seq[int],
+  seq[float],
+  seq[((int, float), (int, float))]
+) {.exportpy.} =
+
+  let top = topologies[top_id]
+
+  let population = top.population
+
+  let pop_size = population.len
+
+  # select
+
+  let selected_sorted_indices = select(top_id, fitnesses, num_selected)
+
+  # get fitnesses
+
+  let selected_sorted_fitnesses = selected_sorted_indices.map(index => fitnesses[index])
+
+  let num_tournaments = pop_size - num_selected # replenish back to original population size, 1 child per tournament
+
+  # tournament to get parent pairs
+
+  let parent_indices = tournament(top_id, selected_sorted_fitnesses, num_tournaments, tournament_size)
+
+  # remove least fit
+
+  top.population = selected_sorted_indices.map(index => population[index])
+
+  return (selected_sorted_indices, selected_sorted_fitnesses, parent_indices)
 
 proc mutate(
   top_id: Natural,
@@ -733,7 +769,15 @@ proc crossover(
 when is_main_module:
   let top_id = add_topology(3, 1)
 
-  init_population(top_id, pop_size = 2)
+  init_population(top_id, pop_size = 3)
+
+  let (
+    selected_indices,
+    sorted_selected_fitness,
+    parent_indices_and_fitness
+  ) = select_and_tournament(top_id, @[1.0, 3.0, -1.0], 2, tournament_size = 2)
+
+  assert topologies[top_id].population.len == 2
 
   discard evaluate_nn(top_id, 0, @[@[1.0, 1.0], @[1.0, 1.0], @[2.0, 2.0]])
   discard evaluate_nn_single(top_id, 0, @[1.0, 2.0, 4.0])
