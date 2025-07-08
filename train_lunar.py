@@ -80,8 +80,9 @@ def record_agent_(
 # population policies
 
 dim_state = envs.observation_space.shape[-1]
+num_actions = 4
 
-population = PopulationMLP(dim_state, 16, 16, 5, pop_size = POP_SIZE)
+population = PopulationMLP(dim_state, 16, 16, num_actions, pop_size = POP_SIZE)
 
 # interact with environment across generations
 
@@ -95,6 +96,7 @@ for gen in tqdm(range(NUM_GENERATIONS)):
         actions = population.forward(state)
 
         actions_to_env = np.asarray(actions.argmax(-1))
+
         next_state, reward, truncated, terminated, *_ = envs.step(actions_to_env)
 
         # gymnasium should just make terminated always True if one env terminates before the other..

@@ -30,5 +30,5 @@ def test_hyper():
     weight = top.generate_hyper_weight(0, (3, 5))
     assert weight.shape == (3, 5)
 
-    weights = top.generate_all_hyper_weights(10, (3, 5))
-    assert len(weights) == 10
+    weights = top.generate_hyper_weights(10, (3, 5))
+    assert weights.shape[0] == 10
