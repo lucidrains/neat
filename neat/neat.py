@@ -10,6 +10,8 @@ from jax import (
     Array,
 )
 
+from jax.tree_util import tree_map
+
 import einx
 from einops import einsum
 
@@ -162,5 +164,9 @@ class PopulationMLP:
 
         pass
 
-    def forward(self, t: Array):
-        return mlp(self.weights, self.biases, t)
+    def single_forward(self, index: int, state: Array):
+        single_weight, single_bias = tree_map(lambda t: t[index], (self.weights, self.biases))
+        return mlp(single_weight, single_bias, state)
+
+    def forward(self, state: Array):
+        return mlp(self.weights, self.biases, state)

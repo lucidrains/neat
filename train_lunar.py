@@ -2,7 +2,6 @@ import numpy as np
 from tqdm import tqdm
 
 import jax.numpy as jnp
-from jax.tree_util import tree_map
 
 from neat.neat import PopulationMLP, mlp
 
@@ -54,17 +53,13 @@ env = gym.wrappers.RecordVideo(
 
 def record_agent_(
     policy_index,
-    policy_weights,
-    policy_biases,
     seed = None
 ):
-
-    single_policy_weights, single_policy_biases = tree_map(lambda t: t[policy_index], (policy_weights, policy_biases))
 
     state, _ = env.reset(seed = seed)
 
     while True:
-        actions = mlp(single_policy_weights, single_policy_biases, state)
+        actions = population.single_forward(policy_index, state)
 
         action = np.asarray(actions.argmax(axis = -1))
 
@@ -120,6 +115,6 @@ for gen in tqdm(range(NUM_GENERATIONS)):
     population.genetic_algorithm_step(fitnesses)
 
     if divisible_by(gen + 1, RECORD_EVERY):
-        record_agent_(0, population.weights, population.biases)
+        record_agent_(0)
 
     print(f'cumulative rewards mean: {rewards.mean():.3f} | std: {rewards.std():.3f}')
