@@ -3,7 +3,7 @@ from neat.neat import (
 )
 
 def test_add_neuron_and_synapse():
-    top = Topology(2, 1)
+    top = Topology(2, 1, 1)
     assert top.add_neuron() == 3
     assert top.add_neuron() == 4
     assert top.add_synapse( 0, 3) == 2
@@ -25,10 +25,6 @@ def test_population_mlp():
     assert action_logits.shape == (8, 5)
 
 def test_hyper():
-    top = Topology(2, 1)
-    top.init_population(10)
-    weight = top.generate_hyper_weight(0, (3, 5))
-    assert weight.shape == (3, 5)
-
-    weights = top.generate_hyper_weights(10, (3, 5))
-    assert weights.shape[0] == 10
+    top = Topology(num_inputs = 2, num_outputs = 1, pop_size = 10, shape = (3, 5))
+    weights = top.generate_hyper_weights()
+    assert weights.shape == (10, 3, 5)
