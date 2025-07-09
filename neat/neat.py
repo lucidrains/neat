@@ -12,6 +12,8 @@ from jax import (
 
 from jax.tree_util import tree_map
 
+from itertools import product
+
 import einx
 from einops import einsum
 
@@ -22,10 +24,10 @@ from neat.neat_nim import (
     remove_topology,
     init_population as init_population_nim,
     generate_hyper_weights as generate_hyper_weights_nim,
+    crossover_and_add_to_population,
     select_and_tournament,
     add_node,
     add_edge,
-    crossover,
     mutate,
     evaluate_nn
 )
@@ -117,7 +119,7 @@ class PopulationMLP:
     def __init__(
         self,
         *dims,
-        pop_size
+        pop_size,
     ):
         self.dims = dims
         assert len(dims) > 1
@@ -138,6 +140,8 @@ class PopulationMLP:
         self.hyper_weights_nn = hyper_weights_nn
         self.hyper_biases_nn = hyper_biases_nn
 
+        self.all_top_ids = [top.id for top in (self.hyper_weights_nn + self.hyper_biases_nn)]
+
         self.generate_hyper_weights_and_biases()
 
     def generate_hyper_weights_and_biases(self):
@@ -148,21 +152,33 @@ class PopulationMLP:
     def genetic_algorithm_step(
         self,
         fitnesses: Array,
-        top_id: int = 0,
-        num_selected = 2
+        num_selected = 2,
+        tournament_frac = 0.25,
+        n_jobs = -1
     ):
         assert num_selected >= 2
 
-        policy_weights, policy_biases = (self.weights, self.biases)
+        print(f'fitness: max {fitnesses.max():.2f} | mean {fitnesses.mean():.2f} | std {fitnesses.std():.2f}')
 
-        # todo
+        tournament_size = max(2, int(tournament_frac * num_selected))
+
         # 1. selection
         # 2. tournament -> parent pairs
+
+        (
+            sel_indices,
+            fitnesses,
+            parent_indices_and_fitnesses
+        )= select_and_tournament(self.all_top_ids, fitnesses.tolist(), num_selected, tournament_size)
+
         # 3. compute children with crossover
         # 4. concat children to population
+
+        Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(crossover_and_add_to_population)(top_id, parent_indices_and_fitnesses) for top_id in self.all_top_ids)
+
         # 5. mutation
 
-        pass
+        Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(mutate)(top_id, nn_id) for top_id, nn_id in product(self.all_top_ids, range(self.pop_size)))
 
     def single_forward(self, index: int, state: Array):
         single_weight, single_bias = tree_map(lambda t: t[index], (self.weights, self.biases))

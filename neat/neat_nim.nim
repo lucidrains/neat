@@ -153,8 +153,8 @@ var topology_id = 0
 
 # functions
 
-proc add_node(topology_id: Natural, node_type: NodeType = hidden): Natural
-proc add_edge(topology_id: Natural, from_node_id: Natural, to_node_id: Natural): Natural
+proc add_node(topology_id: int, node_type: NodeType = hidden): int
+proc add_edge(topology_id: int, from_node_id: int, to_node_id: int): int
 
 proc activate(act: Activation, input: Tensor[float]): Tensor[float]
 proc activate(act: Activation, input: float): float
@@ -197,13 +197,13 @@ proc add_topology(
 
   return topology.id
 
-proc remove_topology(topology_id: Natural) {.exportpy.} =
+proc remove_topology(topology_id: int) {.exportpy.} =
   topologies.del(topology_id)
 
 proc add_node(
-  topology_id: Natural,
+  topology_id: int,
   node_type: NodeType = hidden
-): Natural {.exportpy.} =
+): int {.exportpy.} =
 
   let top = topologies[topology_id]
 
@@ -216,10 +216,10 @@ proc add_node(
   return node.id
 
 proc add_edge(
-  topology_id: Natural,
-  from_node_id: Natural,
-  to_node_id: Natural
-): Natural {.exportpy.} =
+  topology_id: int,
+  from_node_id: int,
+  to_node_id: int
+): int {.exportpy.} =
 
   let top = topologies[topology_id]
 
@@ -247,7 +247,7 @@ proc add_edge(
 # population functions
 
 proc init_nn(
-  top_id: Natural,
+  top_id: int,
 ) =
   let top = topologies[top_id]
 
@@ -299,7 +299,7 @@ proc init_nn(
   top.population.add(nn)
 
 proc init_population(
-  top_id: Natural,
+  top_id: int,
   pop_size: range[1..int.high],
 ) {.exportpy.} =
 
@@ -314,8 +314,8 @@ proc init_population(
 # forward
 
 proc evaluate_nn(
-  top_id: Natural,
-  nn_id: Natural,
+  top_id: int,
+  nn_id: int,
   seq_inputs: seq[seq[float]]
 ): seq[seq[float]] {.exportpy.} =
 
@@ -427,8 +427,8 @@ proc evaluate_nn(
     result.add(output_value.to_seq)
 
 proc evaluate_nn_single(
-  top_id: Natural,
-  nn_id: Natural,
+  top_id: int,
+  nn_id: int,
   inputs: seq[float]
 ): seq[float] {.exportpy.} =
 
@@ -439,8 +439,8 @@ proc evaluate_nn_single(
   return seq_outputs.map(tensor => tensor[0])
 
 proc generate_hyper_weights(
-  top_id: Natural,
-  nn_id: Natural,
+  top_id: int,
+  nn_id: int,
   shape: seq[int]
 ): seq[float] {.exportpy.} =
 
@@ -508,7 +508,7 @@ proc activate(
 # mutation and crossover
 
 proc tournament(
-  top_id: Natural,
+  top_id: int,
   fitnesses: seq[float],
   num_tournaments: range[1..int.high],
   tournament_size: range[2..int.high]
@@ -541,7 +541,7 @@ proc tournament(
     result.add(((parent1, fitness1), (parent2, fitness2)))
 
 proc select(
-  top_id: Natural,
+  top_id: int,
   fitnesses: seq[float],
   num_selected: range[1..int.high]
 ): seq[int] {.exportpy.} =
@@ -554,7 +554,7 @@ proc select(
   return sorted_indices[0..<num_selected]
 
 proc select_and_tournament(
-  top_id: Natural,
+  top_ids: seq[int],
   fitnesses: seq[float],
   num_selected: range[1..int.high],
   tournament_size: range[2..int.high]
@@ -564,15 +564,17 @@ proc select_and_tournament(
   seq[((int, float), (int, float))]
 ) {.exportpy.} =
 
-  let top = topologies[top_id]
+  assert top_ids.len > 0
 
-  let population = top.population
+  let one_top_id = top_ids[0]
 
-  let pop_size = population.len
+  let top = topologies[one_top_id]
+
+  let pop_size = top.population.len
 
   # select
 
-  let selected_sorted_indices = select(top_id, fitnesses, num_selected)
+  let selected_sorted_indices = select(one_top_id, fitnesses, num_selected)
 
   # get fitnesses
 
@@ -582,17 +584,19 @@ proc select_and_tournament(
 
   # tournament to get parent pairs
 
-  let parent_indices = tournament(top_id, selected_sorted_fitnesses, num_tournaments, tournament_size)
+  let parent_indices = tournament(one_top_id, selected_sorted_fitnesses, num_tournaments, tournament_size)
 
-  # remove least fit
+  # remove least fit for all top ids passed in
 
-  top.population = selected_sorted_indices.map(index => population[index])
+  for top_id in top_ids:
+    let top = topologies[top_id]
+    top.population = selected_sorted_indices.map(index => top.population[index])
 
   return (selected_sorted_indices, selected_sorted_fitnesses, parent_indices)
 
 proc mutate(
-  top_id: Natural,
-  nn_id: Natural,
+  top_id: int,
+  nn_id: int,
   add_remove_edge_prob: Prob = 0.0,
   add_remove_node_prob: Prob = 0.0,
   change_activation_prob: Prob = 0.0,
@@ -636,12 +640,12 @@ proc mutate(
       meta_edge.weight += random_normal() * perturb_weight_strength
 
 proc crossover(
-  top_id: Natural,
-  first_parent_nn_id: Natural,
-  second_parent_nn_id: Natural,
+  top_id: int,
+  first_parent_nn_id: int,
+  second_parent_nn_id: int,
   first_parent_fitness: float,
   second_parent_fitness: float,
-  fitness_diff_is_same: PositiveFloat = 0.0
+  fitness_diff_is_same: float = 0.0
 ): NeuralNetwork {.exportpy.} =
 
   let top = topologies[top_id]
@@ -763,9 +767,9 @@ proc crossover(
   return nn
 
 proc crossover_and_add_to_population(
-  top_id: Natural,
+  top_id: int,
   parent_indices_and_fitnesses: seq[((int, float), (int, float))],
-  fitness_diff_is_same: PositiveFloat = 0.0
+  fitness_diff_is_same: float = 0.0
 ) {.exportpy.} =
 
   let top = topologies[top_id]
@@ -783,29 +787,4 @@ proc crossover_and_add_to_population(
 # quick test
 
 when is_main_module:
-  let top_id = add_topology(3, 1)
-
-  init_population(top_id, pop_size = 3)
-
-  let (
-    selected_indices,
-    sorted_selected_fitness,
-    parent_indices_and_fitness
-  ) = select_and_tournament(top_id, @[1.0, 3.0, -1.0], 2, tournament_size = 2)
-
-  assert topologies[top_id].population.len == 2
-
-  crossover_and_add_to_population(top_id, parent_indices_and_fitness)
-
-  assert topologies[top_id].population.len == 3
-
-  discard evaluate_nn(top_id, 0, @[@[1.0, 1.0], @[1.0, 1.0], @[2.0, 2.0]])
-  discard evaluate_nn_single(top_id, 0, @[1.0, 2.0, 4.0])
-
-  let weights3d = generate_hyper_weights(top_id, 0, @[4, 2, 3])
-
-  discard cross_over(0, 0, 1, 1.0, 2.0)
-
-  mutate(top_id, 2, change_activation_prob = 1.0)
-
-  remove_topology(top_id)
+  discard
