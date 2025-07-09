@@ -541,19 +541,6 @@ proc tournament(
 
     result.add(((parent1, fitness1), (parent2, fitness2)))
 
-proc select(
-  top_id: int,
-  fitnesses: seq[float],
-  num_selected: range[1..int.high]
-): seq[int] {.exportpy.} =
-
-  let sorted_indices = fitnesses
-    .to_tensor()
-    .argsort(order = SortOrder.Descending)
-    .to_flat_seq()
-
-  return sorted_indices[0..<num_selected]
-
 proc select_and_tournament(
   top_ids: seq[int],
   fitnesses: seq[float],
@@ -575,7 +562,12 @@ proc select_and_tournament(
 
   # select
 
-  let selected_sorted_indices = select(one_top_id, fitnesses, num_selected)
+  let sorted_indices = fitnesses
+    .to_tensor()
+    .argsort(order = SortOrder.Descending)
+    .to_flat_seq()
+
+  let selected_sorted_indices = sorted_indices[0..<num_selected]
 
   # get fitnesses
 

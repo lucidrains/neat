@@ -22,6 +22,8 @@ def test_population_mlp():
     pop = PopulationMLP(10, 16, 16, 5, pop_size = 8)
 
     action_logits = pop.forward(jnp.zeros((8, 10)))
+    pop.genetic_algorithm_step(jnp.ones((8,)), num_selected = 4)
+
     assert action_logits.shape == (8, 5)
 
 def test_hyper():

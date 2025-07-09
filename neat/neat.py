@@ -172,10 +172,15 @@ class PopulationMLP:
         fitnesses: Array,
         num_selected = 2,
         tournament_frac = 0.25,
-        num_preserve_elites = 10,
+        num_preserve_elites_frac = 0.1,
         n_jobs = -1
     ):
         assert num_selected >= 2
+
+        assert 0. <= num_preserve_elites_frac <= 1.
+        assert 0. <= tournament_frac <= 1.
+
+        num_preserve_elites = int(num_preserve_elites_frac * num_selected)
         assert num_preserve_elites < num_selected
 
         print(f'fitness: max {fitnesses.max():.2f} | mean {fitnesses.mean():.2f} | std {fitnesses.std():.2f}')
