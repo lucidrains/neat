@@ -1,4 +1,5 @@
 from __future__ import annotations
+from random import randrange
 
 import jax
 from jax import (
@@ -41,6 +42,23 @@ def exists(v):
 
 def default(v, d):
     return v if exists(v) else d
+
+# sampling
+
+def log(t, eps = 1e-20):
+    return jnp.log(t + eps)
+
+def gumbel_noise(t):
+    key = random.PRNGKey(randrange(int(1e6)))
+    noise = random.uniform(key, t.shape)
+    return -log(-log(noise))
+
+def gumbel_sample(t, temperature = 1.):
+    if temperature > 0.:
+        t = t / temperature
+        t = t + gumbel_noise(t)
+
+    return t.argmax(axis = -1).tolist()
 
 # topology
 
@@ -154,9 +172,11 @@ class PopulationMLP:
         fitnesses: Array,
         num_selected = 2,
         tournament_frac = 0.25,
+        num_preserve_elites = 10,
         n_jobs = -1
     ):
         assert num_selected >= 2
+        assert num_preserve_elites < num_selected
 
         print(f'fitness: max {fitnesses.max():.2f} | mean {fitnesses.mean():.2f} | std {fitnesses.std():.2f}')
 
@@ -178,11 +198,32 @@ class PopulationMLP:
 
         # 5. mutation
 
-        Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(mutate)(top_id, nn_id) for top_id, nn_id in product(self.all_top_ids, range(self.pop_size)))
+        Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(mutate)(top_id, nn_id) for top_id, nn_id in product(self.all_top_ids, range(num_preserve_elites, self.pop_size)))
 
-    def single_forward(self, index: int, state: Array):
+    def single_forward(
+        self,
+        index: int,
+        state: Array,
+        sample = False,
+        temperature = 1.
+    ):
         single_weight, single_bias = tree_map(lambda t: t[index], (self.weights, self.biases))
-        return mlp(single_weight, single_bias, state)
+        logits = mlp(single_weight, single_bias, state)
 
-    def forward(self, state: Array):
-        return mlp(self.weights, self.biases, state)
+        if not sample:
+            return logits
+
+        return gumbel_sample(logits, temperature = temperature)
+
+    def forward(
+        self,
+        state: Array,
+        sample = False,
+        temperature = 1.
+    ):
+        logits = mlp(self.weights, self.biases, state)
+
+        if not sample:
+            return logits
+
+        return gumbel_sample(logits, temperature = temperature)

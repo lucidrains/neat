@@ -18,8 +18,8 @@ def divisible_by(num, den):
 
 # constants
 
-NUM_GENERATIONS = 100
-POP_SIZE = 8
+NUM_GENERATIONS = 500
+POP_SIZE = 250
 RECORD_EVERY = 5 # record every 5 generations
 
 # environment
@@ -59,11 +59,9 @@ def record_agent_(
     state, _ = env.reset(seed = seed)
 
     while True:
-        actions = population.single_forward(policy_index, state)
+        actions_to_env = population.single_forward(policy_index, state, sample = True)
 
-        action = np.asarray(actions.argmax(axis = -1))
-
-        next_state, reward, truncated, terminated, *_ = env.step(action)
+        next_state, reward, truncated, terminated, *_ = env.step(actions_to_env)
 
         state = next_state
 
@@ -77,7 +75,7 @@ def record_agent_(
 dim_state = envs.observation_space.shape[-1]
 num_actions = 4
 
-population = PopulationMLP(dim_state, 16, 16, num_actions, pop_size = POP_SIZE)
+population = PopulationMLP(dim_state, 32, 32, num_actions, pop_size = POP_SIZE)
 
 # interact with environment across generations
 
@@ -88,9 +86,7 @@ for gen in tqdm(range(NUM_GENERATIONS)):
     done = None
 
     while True:
-        actions = population.forward(state)
-
-        actions_to_env = np.asarray(actions.argmax(-1))
+        actions_to_env = population.forward(state, sample = True)
 
         next_state, reward, truncated, terminated, *_ = envs.step(actions_to_env)
 
@@ -112,9 +108,7 @@ for gen in tqdm(range(NUM_GENERATIONS)):
 
     fitnesses = rewards.sum(axis = 0) # cumulative rewards as fitnesses
 
-    population.genetic_algorithm_step(fitnesses)
+    population.genetic_algorithm_step(fitnesses, num_selected = int(POP_SIZE * 0.25))
 
     if divisible_by(gen + 1, RECORD_EVERY):
         record_agent_(0)
-
-    print(f'cumulative rewards mean: {rewards.mean():.3f} | std: {rewards.std():.3f}')

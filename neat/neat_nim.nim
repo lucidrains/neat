@@ -20,7 +20,6 @@ import arraymancer
 
 type
   Prob = range[0.0..1.0]
-  PositiveFloat = range[0.0.. Inf]
 
 # init
 
@@ -113,6 +112,7 @@ type
     node_id: int
     disabled: bool
     can_disable: bool
+    can_change_activation: bool = true
     activation: Activation = tanh
     bias: float = 0.0
 
@@ -264,7 +264,8 @@ proc init_nn(
       node_id: node.id,
       disabled: false,
       can_disable: false,
-      activation: identity
+      can_change_activation: true,
+      activation: tanh
     )
 
     nn.meta_nodes.add(meta_node)
@@ -276,6 +277,7 @@ proc init_nn(
     let meta_node = MetaNode(
       node_id: node.id,
       disabled: false,
+      can_change_activation: false,
       activation: sigmoid
     )
 
@@ -508,7 +510,6 @@ proc activate(
 # mutation and crossover
 
 proc tournament(
-  top_id: int,
   fitnesses: seq[float],
   num_tournaments: range[1..int.high],
   tournament_size: range[2..int.high]
@@ -584,7 +585,7 @@ proc select_and_tournament(
 
   # tournament to get parent pairs
 
-  let parent_indices = tournament(one_top_id, selected_sorted_fitnesses, num_tournaments, tournament_size)
+  let parent_indices = tournament(selected_sorted_fitnesses, num_tournaments, tournament_size)
 
   # remove least fit for all top ids passed in
 
@@ -597,11 +598,11 @@ proc select_and_tournament(
 proc mutate(
   top_id: int,
   nn_id: int,
-  add_remove_edge_prob: Prob = 0.0,
-  add_remove_node_prob: Prob = 0.0,
-  change_activation_prob: Prob = 0.0,
-  change_edge_weight_prob: Prob = 0.0,
-  change_node_bias_prob: Prob = 0.0,
+  add_remove_edge_prob: Prob = 0.05,
+  add_remove_node_prob: Prob = 0.05,
+  change_activation_prob: Prob = 0.05,
+  change_edge_weight_prob: Prob = 0.05,
+  change_node_bias_prob: Prob = 0.05,
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1
 ) {.exportpy.} =
@@ -620,7 +621,7 @@ proc mutate(
 
     # mutating an activation on a node
 
-    if satisfy_prob(change_activation_prob):
+    if meta_node.can_change_activation and satisfy_prob(change_activation_prob):
       let rand_activation_index = rand(Activation.high.ord)
       meta_node.activation = activations[rand_activation_index]
 
