@@ -200,6 +200,10 @@ class PopulationMLP:
 
         Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(mutate)(top_id, nn_id) for top_id, nn_id in product(self.all_top_ids, range(num_preserve_elites, self.pop_size)))
 
+        # regenerate hyperweights and biases
+
+        self.generate_hyper_weights_and_biases()
+
     def single_forward(
         self,
         index: int,

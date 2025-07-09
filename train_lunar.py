@@ -19,8 +19,9 @@ def divisible_by(num, den):
 # constants
 
 NUM_GENERATIONS = 500
-POP_SIZE = 250
-RECORD_EVERY = 5 # record every 5 generations
+POP_SIZE = 100
+RECORD_EVERY = 10 # record every 5 generations
+MAX_EPISODE_LEN = 250
 
 # environment
 
@@ -84,6 +85,7 @@ for gen in tqdm(range(NUM_GENERATIONS)):
 
     rewards = []
     done = None
+    time = 0
 
     while True:
         actions_to_env = population.forward(state, sample = True)
@@ -101,8 +103,13 @@ for gen in tqdm(range(NUM_GENERATIONS)):
         rewards.append(step_reward)
         state = next_state
 
+        if time >= MAX_EPISODE_LEN:
+            break
+
         if done.all():
             break
+
+        time += 1
 
     rewards = jnp.stack(rewards)
 
