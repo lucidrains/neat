@@ -646,9 +646,11 @@ proc mutate(
   change_activation_prob: Prob = 0.05,
   change_edge_weight_prob: Prob = 0.05,
   change_node_bias_prob: Prob = 0.05,
-  lower_edge_weight_prob: Prob = 0.025,
+  decay_edge_weight_prob: Prob = 0.025,
+  decay_node_bias_prob: Prob = 0.025,
   perturb_weight_strength: Prob = 0.1,
-  perturb_bias_strength: Prob = 0.1
+  perturb_bias_strength: Prob = 0.1,
+  decay_factor: float = 0.1
 ) {.exportpy.} =
 
   let top = topologies[top_id]
@@ -672,6 +674,9 @@ proc mutate(
     if not meta_node.disabled and satisfy_prob(change_node_bias_prob):
       meta_node.bias += random_normal() * perturb_bias_strength
 
+    if not meta_node.disabled and satisfy_prob(decay_node_bias_prob):
+      meta_node.bias *= decay_factor
+
   for meta_edge in nn.meta_edges:
 
     # enabling / disabling an edge
@@ -684,8 +689,8 @@ proc mutate(
     if not meta_edge.disabled and satisfy_prob(change_edge_weight_prob):
       meta_edge.weight += random_normal() * perturb_weight_strength
 
-    if not meta_edge.disabled and satisfy_prob(lower_edge_weight_prob):
-      meta_edge.weight *= 0.1
+    if not meta_edge.disabled and satisfy_prob(decay_edge_weight_prob):
+      meta_edge.weight *= decay_factor
 
 proc crossover(
   top_id: int,
