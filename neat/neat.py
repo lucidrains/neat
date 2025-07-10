@@ -71,7 +71,7 @@ class Topology:
         num_hiddens = 32,
         shape: tuple[int, ...] | None = None
     ):
-        self.id = add_topology(num_inputs, num_outputs)
+        self.id = add_topology(num_inputs, num_outputs, num_hiddens)
 
         self.init_population(pop_size)
 
@@ -139,6 +139,7 @@ class PopulationMLP:
         self,
         *dims,
         pop_size,
+        num_hiddens = 0
     ):
         self.dims = dims
         assert len(dims) > 1
@@ -153,8 +154,8 @@ class PopulationMLP:
             weight_shape = (dim_in, dim_out)
             bias_shape = (dim_out,)
 
-            hyper_weights_nn.append(Topology(2, 1, pop_size, shape = weight_shape))
-            hyper_biases_nn.append(Topology(1, 1, pop_size, shape = bias_shape))
+            hyper_weights_nn.append(Topology(2, 1, pop_size, num_hiddens = num_hiddens, shape = weight_shape))
+            hyper_biases_nn.append(Topology(1, 1, pop_size, num_hiddens = num_hiddens, shape = bias_shape))
 
         self.hyper_weights_nn = hyper_weights_nn
         self.hyper_biases_nn = hyper_biases_nn

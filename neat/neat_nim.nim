@@ -437,6 +437,10 @@ proc evaluate_nn(
       if meta_edge.disabled:
         continue
 
+      if not edge_index.has_key(meta_edge.edge_id):
+        # node may be disabled above
+        continue
+
       let (local_from_node_id, local_to_node_id) = edge_index[meta_edge.edge_id]
 
       if local_to_node_id != index:

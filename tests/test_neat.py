@@ -3,10 +3,10 @@ from neat.neat import (
 )
 
 def test_add_neuron_and_synapse():
-    top = Topology(2, 1, 1)
+    top = Topology(2, 1, 1, num_hiddens = 0)
     assert top.add_neuron() == 3
     assert top.add_neuron() == 4
-    assert top.add_synapse( 0, 3) == 2
+    assert top.add_synapse(0, 3) == 2
 
 # mlp with population dim
 
@@ -19,7 +19,7 @@ from neat.neat import (
 )
 
 def test_population_mlp():
-    pop = PopulationMLP(10, 16, 16, 5, pop_size = 8)
+    pop = PopulationMLP(10, 16, 16, 5, num_hiddens = 16, pop_size = 8)
 
     action_logits = pop.forward(jnp.zeros((8, 10)))
     pop.genetic_algorithm_step(jnp.ones((8,)), num_selected = 4)
