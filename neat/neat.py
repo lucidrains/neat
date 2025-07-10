@@ -68,6 +68,7 @@ class Topology:
         num_inputs,
         num_outputs,
         pop_size,
+        num_hiddens = 32,
         shape: tuple[int, ...] | None = None
     ):
         self.id = add_topology(num_inputs, num_outputs)
@@ -170,11 +171,18 @@ class PopulationMLP:
     def genetic_algorithm_step(
         self,
         fitnesses: Array,
-        num_selected = 2,
+        num_selected = None,
+        num_selected_frac = None,
         tournament_frac = 0.25,
         num_preserve_elites_frac = 0.1,
         n_jobs = -1
     ):
+        assert exists(num_selected) ^ exists(num_selected_frac)
+
+        if exists(num_selected_frac):
+            assert 0. < num_selected_frac < 1.
+            num_selected = min(2, int(self.pop_size * num_selected_frac))
+
         assert num_selected >= 2
 
         assert 0. <= num_preserve_elites_frac <= 1.

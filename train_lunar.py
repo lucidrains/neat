@@ -20,8 +20,10 @@ def divisible_by(num, den):
 
 NUM_GENERATIONS = 500
 POP_SIZE = 100
-RECORD_EVERY = 10 # record every 5 generations
+RECORD_EVERY = 10
 MAX_EPISODE_LEN = 250
+FRAC_NATURAL_SELECTED = 0.25
+NUM_ROLLOUTS_BEFORE_EVO = 3
 
 # environment
 
@@ -81,41 +83,52 @@ population = PopulationMLP(dim_state, 32, 32, num_actions, pop_size = POP_SIZE)
 # interact with environment across generations
 
 for gen in tqdm(range(NUM_GENERATIONS)):
-    state, _ = envs.reset()
 
-    rewards = []
-    done = None
-    time = 0
+    all_fitnesses = []
 
-    while True:
-        actions_to_env = population.forward(state, sample = True)
+    for _ in range(NUM_ROLLOUTS_BEFORE_EVO):
 
-        next_state, reward, truncated, terminated, *_ = envs.step(actions_to_env)
+        state, _ = envs.reset()
 
-        # gymnasium should just make terminated always True if one env terminates before the other..
+        done = None
+        time = 0
+        rewards = []
 
-        is_done_this_step = truncated | terminated
-        done = default(done, is_done_this_step)
-        done |= is_done_this_step
+        while True:
+            actions_to_env = population.forward(state, sample = True)
 
-        step_reward = reward * done.astype(jnp.float32)  # insurance, in case gymnasium borks and returns rewards for terminated envs in a collection of vec envs
+            next_state, reward, truncated, terminated, *_ = envs.step(actions_to_env)
 
-        rewards.append(step_reward)
-        state = next_state
+            # gymnasium should just make terminated always True if one env terminates before the other..
 
-        if time >= MAX_EPISODE_LEN:
-            break
+            is_done_this_step = truncated | terminated
+            done = default(done, is_done_this_step)
+            done |= is_done_this_step
 
-        if done.all():
-            break
+            step_reward = reward * done.astype(jnp.float32)  # insurance, in case gymnasium borks and returns rewards for terminated envs in a collection of vec envs
 
-        time += 1
+            rewards.append(step_reward)
+            state = next_state
 
-    rewards = jnp.stack(rewards)
+            if time >= MAX_EPISODE_LEN:
+                break
 
-    fitnesses = rewards.sum(axis = 0) # cumulative rewards as fitnesses
+            if done.all():
+                break
 
-    population.genetic_algorithm_step(fitnesses, num_selected = int(POP_SIZE * 0.25))
+            time += 1
+
+        rewards = jnp.stack(rewards)
+
+        one_rollout_fitnesses = rewards.sum(axis = 0) # cumulative rewards as fitnesses
+
+        all_fitnesses.append(one_rollout_fitnesses)
+
+    fitnesses = jnp.stack(all_fitnesses).mean(axis = 0)
+
+    # insilico evolution
+
+    population.genetic_algorithm_step(fitnesses, num_selected_frac = FRAC_NATURAL_SELECTED)
 
     if divisible_by(gen + 1, RECORD_EVERY):
         record_agent_(0)

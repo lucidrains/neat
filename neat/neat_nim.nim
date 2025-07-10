@@ -162,7 +162,8 @@ proc activate(node: MetaNode, input: Tensor[float]): Tensor[float]
 
 proc add_topology(
   num_inputs: int,
-  num_outputs: int
+  num_outputs: int,
+  num_hiddens: int
 ): int {.exportpy.} =
 
   let topology = Topology(
@@ -180,6 +181,8 @@ proc add_topology(
   let
     input_node_ids = (0..<num_inputs).to_seq
     output_node_ids = (num_inputs..<(num_inputs + num_outputs)).to_seq
+    hidden_index_start = num_inputs + num_outputs
+    hidden_node_ids = (hidden_index_start..<(hidden_index_start + num_hiddens)).to_seq
 
   for _ in 0..<num_inputs:
     discard add_node(topology.id, NodeType.input)
@@ -192,6 +195,18 @@ proc add_topology(
   for input_id in input_node_ids:
     for output_id in output_node_ids:
       discard add_edge(topology.id, input_id, output_id)
+
+  # initial pool of hidden nodes and edges, all disabled for new neural networks at start
+
+  for _ in 0..<num_hiddens:
+    discard add_node(topology.id, NodeType.hidden)
+
+  for hidden_id in hidden_node_ids:
+    for input_id in input_node_ids:
+      discard add_edge(topology.id, input_id, hidden_id)
+
+    for output_id in output_node_ids:
+      discard add_edge(topology.id, hidden_id, output_id)
 
   # return id
 
@@ -247,7 +262,7 @@ proc add_edge(
 # population functions
 
 proc init_nn(
-  top_id: int,
+  top_id: int
 ) =
   let top = topologies[top_id]
 
@@ -255,10 +270,14 @@ proc init_nn(
   nn.num_inputs = top.num_inputs
   nn.num_outputs = top.num_outputs
 
-  # initialize nodes
+  let
+    output_node_index_start = top.num_inputs
+    hidden_node_index_start = top.num_inputs + top.num_outputs
+    hidden_edge_index_start = top.num_inputs * top.num_outputs
 
-  for node_id in 0..<top.num_inputs:
-    let node = top.nodes[node_id]
+  # initialize input nodes
+
+  for node in top.nodes[0..<top.num_inputs]:
 
     let meta_node = MetaNode(
       node_id: node.id,
@@ -270,9 +289,10 @@ proc init_nn(
 
     nn.meta_nodes.add(meta_node)
 
-  for i in 0..<top.num_outputs:
-    let node_id = top.num_inputs + i
-    let node = top.nodes[node_id]
+  # initial output nodes
+
+  
+  for node in top.nodes[output_node_index_start..<(output_node_index_start + top.num_outputs)]:
 
     let meta_node = MetaNode(
       node_id: node.id,
@@ -285,8 +305,7 @@ proc init_nn(
 
   # create edges - start off with only fully connected from inputs to outputs
 
-  for edge_id in 0..<(top.num_inputs * top.num_outputs):
-      let edge = top.edges[edge_id]
+  for edge in top.edges[0..<(top.num_inputs * top.num_outputs)]:
 
       let meta_edge = MetaEdge(
         edge_id: edge.id,
@@ -295,6 +314,30 @@ proc init_nn(
       )
 
       nn.meta_edges.add(meta_edge)
+
+  # hiddens
+
+  for node in top.nodes[hidden_node_index_start..<top.nodes.len]:
+
+    let meta_node = MetaNode(
+      node_id: node.id,
+      disabled: true,
+      can_disable: true,
+      can_change_activation: true,
+      activation: tanh
+    )
+
+    nn.meta_nodes.add(meta_node)
+
+  for edge in top.edges[hidden_edge_index_start..<top.edges.len]:
+
+    let meta_edge = MetaEdge(
+      edge_id: edge.id,
+      disabled: true,
+      weight: random_normal()
+    )
+
+    nn.meta_edges.add(meta_edge)
 
   # add neural net to population
 
@@ -346,6 +389,10 @@ proc evaluate_nn(
   var edge_index = init_table[int, (int, int)]()
 
   for local_node_index, meta_node in nn.meta_nodes:
+
+    if meta_node.disabled:
+      continue
+
     node_index[meta_node.node_id] = local_node_index
 
   for edge in top.edges:
@@ -780,4 +827,6 @@ proc crossover_and_add_to_population(
 # quick test
 
 when is_main_module:
-  discard
+  let top_id = add_topology(3, 1, 16)
+  init_nn(top_id)
+  remove_topology(top_id)
