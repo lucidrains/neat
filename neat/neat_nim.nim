@@ -305,8 +305,8 @@ proc init_nn(
     let meta_node = MetaNode(
       node_id: node.id,
       disabled: false,
-      can_change_activation: true,
-      activation: tanh
+      can_change_activation: false,
+      activation: sigmoid
     )
 
     nn.meta_nodes.add(meta_node)
@@ -650,22 +650,26 @@ proc select_and_tournament(
 proc mutate(
   top_id: int,
   nn_id: int,
-  add_remove_edge_prob: Prob = 0.05,
-  add_remove_node_prob: Prob = 0.05,
-  change_activation_prob: Prob = 0.05,
-  change_edge_weight_prob: Prob = 0.05,
-  change_node_bias_prob: Prob = 0.05,
+  mutate_prob: Prob = 0.05,
+  add_remove_edge_prob: Prob = 0.01,
+  add_remove_node_prob: Prob = 0.01,
+  change_activation_prob: Prob = 0.01,
+  change_edge_weight_prob: Prob = 0.01,
+  change_node_bias_prob: Prob = 0.01,
   decay_edge_weight_prob: Prob = 0.005,
   decay_node_bias_prob: Prob = 0.005,
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1,
-  decay_factor: float = 0.5
+  decay_factor: float = 0.95
 ) {.exportpy.} =
 
   let top = topologies[top_id]
   let nn = top.population[nn_id]
 
   let activations = Activation.to_seq
+
+  if not satisfy_prob(mutate_prob):
+    return
 
   for meta_node in nn.meta_nodes:
 

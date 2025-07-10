@@ -20,14 +20,14 @@ def divisible_by(num, den):
 # constants
 
 NUM_GENERATIONS = 1000
-POP_SIZE = 100
+POP_SIZE = 150
 NUM_CPPN_HIDDEN_NODES = 16
-NUM_HIDDEN_LAYERS = 2
+NUM_HIDDEN_LAYERS = 3
 RECORD_EVERY = 10
 MAX_EPISODE_LEN = 250
 FRAC_NATURAL_SELECTED = 0.25
 TOURNAMENT_FRAC = 0.25
-NUM_ROLLOUTS_BEFORE_EVO = 2
+NUM_ROLLOUTS_BEFORE_EVO = 1
 
 # environment
 
@@ -83,7 +83,7 @@ dim_state = envs.observation_space.shape[-1]
 num_actions = 4
 
 population = PopulationMLP(
-    dim_state, 64, num_actions,
+    dim_state, 16, 16, num_actions,
 
     num_hiddens = (NUM_CPPN_HIDDEN_NODES,) * NUM_HIDDEN_LAYERS,
     pop_size = POP_SIZE

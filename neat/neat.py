@@ -134,6 +134,8 @@ def mlp(
 
     # last layer
 
+    t = t / jnp.linalg.vector_norm(t, axis = -1, keepdims = True)
+
     weight, bias = weights_biases[-1]
     return einsum(weight, t, '... i o, ... i -> ... o') + bias
 
