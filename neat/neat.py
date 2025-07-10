@@ -71,6 +71,9 @@ class Topology:
         num_hiddens = 32,
         shape: tuple[int, ...] | None = None
     ):
+        if isinstance(num_hiddens, int):
+            num_hiddens = (num_hiddens,)
+
         self.id = add_topology(num_inputs, num_outputs, num_hiddens)
 
         self.init_population(pop_size)

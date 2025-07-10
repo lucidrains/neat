@@ -163,7 +163,7 @@ proc activate(node: MetaNode, input: Tensor[float]): Tensor[float]
 proc add_topology(
   num_inputs: int,
   num_outputs: int,
-  num_hiddens: int
+  num_hiddens: seq[int]
 ): int {.exportpy.} =
 
   let topology = Topology(
@@ -181,8 +181,6 @@ proc add_topology(
   let
     input_node_ids = (0..<num_inputs).to_seq
     output_node_ids = (num_inputs..<(num_inputs + num_outputs)).to_seq
-    hidden_index_start = num_inputs + num_outputs
-    hidden_node_ids = (hidden_index_start..<(hidden_index_start + num_hiddens)).to_seq
 
   for _ in 0..<num_inputs:
     discard add_node(topology.id, NodeType.input)
@@ -198,15 +196,25 @@ proc add_topology(
 
   # initial pool of hidden nodes and edges, all disabled for new neural networks at start
 
-  for _ in 0..<num_hiddens:
-    discard add_node(topology.id, NodeType.hidden)
+  var hidden_node_ids: seq[int] = @[]
 
-  for hidden_id in hidden_node_ids:
-    for input_id in input_node_ids:
-      discard add_edge(topology.id, input_id, hidden_id)
+  for num_hidden_layer in num_hiddens:
+    var layer_hidden_ids: seq[int] = @[]
 
-    for output_id in output_node_ids:
-      discard add_edge(topology.id, hidden_id, output_id)
+    for _ in 0..<num_hidden_layer:
+      layer_hidden_ids.add(add_node(topology.id, NodeType.hidden))
+
+    hidden_node_ids.add(layer_hidden_ids)
+
+  var all_ids: seq[seq[int]] = @[input_node_ids] & hidden_node_ids & @[output_node_ids]
+
+  for layer_index, from_layer_ids in all_ids[0..^2]:
+
+    let to_layer_ids = all_ids[layer_index + 1]
+
+    for from_id in from_layer_ids:
+      for to_id in to_layer_ids:
+        discard add_edge(topology.id, from_id, to_id)
 
   # return id
 
@@ -840,6 +848,8 @@ proc crossover_and_add_to_population(
 # quick test
 
 when is_main_module:
-  let top_id = add_topology(3, 1, 16)
+  let top_id = add_topology(3, 1, @[16, 16])
   init_nn(top_id)
+  init_population(top_id, 10)
+  discard generate_hyper_weights(top_id, 0, @[2, 3, 5])
   remove_topology(top_id)
