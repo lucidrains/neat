@@ -1,4 +1,5 @@
 import numpy as np
+from random import randrange
 from tqdm import tqdm
 
 import jax.numpy as jnp
@@ -18,13 +19,14 @@ def divisible_by(num, den):
 
 # constants
 
-NUM_GENERATIONS = 500
-POP_SIZE = 250
+NUM_GENERATIONS = 1000
+POP_SIZE = 100
 NUM_CPPN_HIDDEN_NODES = 32
 RECORD_EVERY = 10
 MAX_EPISODE_LEN = 250
-FRAC_NATURAL_SELECTED = 0.333
-NUM_ROLLOUTS_BEFORE_EVO = 1
+FRAC_NATURAL_SELECTED = 0.25
+TOURNAMENT_FRAC = 0.25
+NUM_ROLLOUTS_BEFORE_EVO = 3
 
 # environment
 
@@ -79,17 +81,22 @@ def record_agent_(
 dim_state = envs.observation_space.shape[-1]
 num_actions = 4
 
-population = PopulationMLP(dim_state, 32, 32, num_actions, num_hiddens = NUM_CPPN_HIDDEN_NODES, pop_size = POP_SIZE)
+population = PopulationMLP(
+    dim_state, 64, num_actions,
+    num_hiddens = NUM_CPPN_HIDDEN_NODES,
+    pop_size = POP_SIZE
+)
 
 # interact with environment across generations
 
 for gen in tqdm(range(NUM_GENERATIONS)):
 
     all_fitnesses = []
+    seed = randrange(int(1e7))
 
     for _ in range(NUM_ROLLOUTS_BEFORE_EVO):
 
-        state, _ = envs.reset()
+        state, _ = envs.reset(seed = seed)
 
         done = None
         time = 0
@@ -129,7 +136,11 @@ for gen in tqdm(range(NUM_GENERATIONS)):
 
     # insilico evolution
 
-    population.genetic_algorithm_step(fitnesses, num_selected_frac = FRAC_NATURAL_SELECTED)
+    population.genetic_algorithm_step(
+        fitnesses,
+        num_selected_frac = FRAC_NATURAL_SELECTED,
+        tournament_frac = TOURNAMENT_FRAC
+    )
 
     if divisible_by(gen + 1, RECORD_EVERY):
         record_agent_(0)

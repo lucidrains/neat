@@ -297,8 +297,8 @@ proc init_nn(
     let meta_node = MetaNode(
       node_id: node.id,
       disabled: false,
-      can_change_activation: false,
-      activation: sigmoid
+      can_change_activation: true,
+      activation: tanh
     )
 
     nn.meta_nodes.add(meta_node)
@@ -646,11 +646,11 @@ proc mutate(
   change_activation_prob: Prob = 0.05,
   change_edge_weight_prob: Prob = 0.05,
   change_node_bias_prob: Prob = 0.05,
-  decay_edge_weight_prob: Prob = 0.025,
-  decay_node_bias_prob: Prob = 0.025,
+  decay_edge_weight_prob: Prob = 0.005,
+  decay_node_bias_prob: Prob = 0.005,
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1,
-  decay_factor: float = 0.1
+  decay_factor: float = 0.5
 ) {.exportpy.} =
 
   let top = topologies[top_id]
