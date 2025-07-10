@@ -646,6 +646,7 @@ proc mutate(
   change_activation_prob: Prob = 0.05,
   change_edge_weight_prob: Prob = 0.05,
   change_node_bias_prob: Prob = 0.05,
+  lower_edge_weight_prob: Prob = 0.025,
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1
 ) {.exportpy.} =
@@ -682,6 +683,9 @@ proc mutate(
 
     if not meta_edge.disabled and satisfy_prob(change_edge_weight_prob):
       meta_edge.weight += random_normal() * perturb_weight_strength
+
+    if not meta_edge.disabled and satisfy_prob(lower_edge_weight_prob):
+      meta_edge.weight *= 0.1
 
 proc crossover(
   top_id: int,

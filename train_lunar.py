@@ -19,11 +19,12 @@ def divisible_by(num, den):
 # constants
 
 NUM_GENERATIONS = 500
-POP_SIZE = 100
+POP_SIZE = 250
+NUM_CPPN_HIDDEN_NODES = 32
 RECORD_EVERY = 10
 MAX_EPISODE_LEN = 250
-FRAC_NATURAL_SELECTED = 0.25
-NUM_ROLLOUTS_BEFORE_EVO = 3
+FRAC_NATURAL_SELECTED = 0.333
+NUM_ROLLOUTS_BEFORE_EVO = 1
 
 # environment
 
@@ -78,7 +79,7 @@ def record_agent_(
 dim_state = envs.observation_space.shape[-1]
 num_actions = 4
 
-population = PopulationMLP(dim_state, 32, 32, num_actions, pop_size = POP_SIZE)
+population = PopulationMLP(dim_state, 32, 32, num_actions, num_hiddens = NUM_CPPN_HIDDEN_NODES, pop_size = POP_SIZE)
 
 # interact with environment across generations
 

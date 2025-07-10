@@ -127,7 +127,7 @@ def mlp(
 
     for weight, bias in weights_biases[:-1]:
         t = einsum(weight, t, '... i o, ... i -> ... o') + bias
-        t = nn.silu(t)
+        t = nn.relu(t)
 
     # last layer
 
