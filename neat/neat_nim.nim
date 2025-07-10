@@ -329,8 +329,9 @@ proc init_nn(
 
     let meta_node = MetaNode(
       node_id: node.id,
-      disabled: true,
+      disabled: coin_flip(),
       can_disable: true,
+      bias: random_normal(),
       can_change_activation: true,
       activation: tanh
     )
@@ -341,7 +342,7 @@ proc init_nn(
 
     let meta_edge = MetaEdge(
       edge_id: edge.id,
-      disabled: true,
+      disabled: coin_flip(),
       weight: random_normal()
     )
 
