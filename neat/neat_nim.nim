@@ -512,7 +512,6 @@ proc evaluate_population(
 
   for nn_id, input in inputs:
     let nn = top.population[nn_id]
-    echo input.len, nn.num_inputs
     assert nn.num_inputs == input.len
 
     let seq_outputs = evaluate_nn_single(top_id, nn_id, input)

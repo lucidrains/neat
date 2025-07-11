@@ -20,9 +20,12 @@ def divisible_by(num, den):
 # constants
 
 NUM_GENERATIONS = 1000
-POP_SIZE = 150
-NUM_CPPN_HIDDEN_NODES = 24
-NUM_HIDDEN_LAYERS = 3
+
+TEST_REGULAR_NEAT = True
+POP_SIZE = 50
+NUM_CPPN_HIDDEN_NODES = 16
+NUM_HIDDEN_LAYERS = 2
+
 RECORD_EVERY = 10
 MAX_EPISODE_LEN = 250
 FRAC_NATURAL_SELECTED = 0.25
@@ -82,12 +85,18 @@ def record_agent_(
 dim_state = envs.observation_space.shape[-1]
 num_actions = 4
 
-population = HyperNEAT(
-    dim_state, 16, 16, num_actions,
+if TEST_REGULAR_NEAT:
+    population = NEAT(
+        dim_state, 16, 16, num_actions,
+        pop_size = POP_SIZE
+    )
+else:
+    population = HyperNEAT(
+        dim_state, 16, 16, num_actions,
 
-    num_hiddens = (NUM_CPPN_HIDDEN_NODES,) * NUM_HIDDEN_LAYERS,
-    pop_size = POP_SIZE
-)
+        num_hiddens = (NUM_CPPN_HIDDEN_NODES,) * NUM_HIDDEN_LAYERS,
+        pop_size = POP_SIZE
+    )
 
 # interact with environment across generations
 
