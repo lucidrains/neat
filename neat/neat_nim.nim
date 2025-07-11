@@ -672,16 +672,16 @@ proc select_and_tournament(
 proc mutate(
   top_id: int,
   nn_id: int,
-  mutate_prob: Prob = 0.05,
-  add_remove_edge_prob: Prob = 0.01,
-  add_remove_node_prob: Prob = 0.01,
-  change_activation_prob: Prob = 0.01,
-  change_edge_weight_prob: Prob = 0.01,
-  change_node_bias_prob: Prob = 0.01,
+  mutate_prob: Prob = 0.4,
+  add_remove_edge_prob: Prob = 0.05,
+  add_remove_node_prob: Prob = 0.05,
+  change_activation_prob: Prob = 0.05,
+  change_edge_weight_prob: Prob = 0.05,
+  change_node_bias_prob: Prob = 0.05,
   decay_edge_weight_prob: Prob = 0.005,
   decay_node_bias_prob: Prob = 0.005,
-  perturb_weight_strength: Prob = 0.1,
-  perturb_bias_strength: Prob = 0.1,
+  perturb_weight_strength: Prob = 0.25,
+  perturb_bias_strength: Prob = 0.25,
   decay_factor: float = 0.95
 ) {.exportpy.} =
 
