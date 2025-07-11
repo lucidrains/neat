@@ -134,8 +134,6 @@ def mlp(
 
     # last layer
 
-    t = t / jnp.linalg.vector_norm(t, axis = -1, keepdims = True)
-
     weight, bias = weights_biases[-1]
     return einsum(weight, t, '... i o, ... i -> ... o') + bias
 
@@ -173,6 +171,10 @@ class PopulationMLP:
 
         self.weights = [nn.generate_hyper_weights() for nn in self.hyper_weights_nn]
         self.biases = [nn.generate_hyper_weights() for nn in self.hyper_biases_nn]
+
+        # do a weight norm
+
+        self.weights = [w / jnp.linalg.norm(w, axis = (-1, -2), keepdims = True) for w in self.weights]
 
     def genetic_algorithm_step(
         self,

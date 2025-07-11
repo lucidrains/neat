@@ -14,8 +14,6 @@ import std/[
 
 import bitvector
 
-import malebolgia
-
 import arraymancer
 
 type
@@ -159,6 +157,7 @@ proc add_edge(topology_id: int, from_node_id: int, to_node_id: int): int
 proc activate(act: Activation, input: Tensor[float]): Tensor[float]
 proc activate(act: Activation, input: float): float
 proc activate(node: MetaNode, input: Tensor[float]): Tensor[float]
+proc rand_activation(): Activation
 
 proc add_topology(
   num_inputs: int,
@@ -270,7 +269,8 @@ proc add_edge(
 # population functions
 
 proc init_nn(
-  top_id: int
+  top_id: int,
+  sparsity: float = 0.05
 ) =
   let top = topologies[top_id]
 
@@ -291,8 +291,8 @@ proc init_nn(
       node_id: node.id,
       disabled: false,
       can_disable: false,
-      can_change_activation: true,
-      activation: tanh
+      can_change_activation: false,
+      activation: identity
     )
 
     nn.meta_nodes.add(meta_node)
@@ -305,8 +305,9 @@ proc init_nn(
     let meta_node = MetaNode(
       node_id: node.id,
       disabled: false,
+      can_disable: false,
       can_change_activation: false,
-      activation: sigmoid
+      activation: tanh
     )
 
     nn.meta_nodes.add(meta_node)
@@ -329,11 +330,11 @@ proc init_nn(
 
     let meta_node = MetaNode(
       node_id: node.id,
-      disabled: coin_flip(),
+      disabled: satisfy_prob(sparsity),
       can_disable: true,
       bias: random_normal(),
       can_change_activation: true,
-      activation: tanh
+      activation: rand_activation()
     )
 
     nn.meta_nodes.add(meta_node)
@@ -342,7 +343,7 @@ proc init_nn(
 
     let meta_edge = MetaEdge(
       edge_id: edge.id,
-      disabled: coin_flip(),
+      disabled: satisfy_prob(sparsity),
       weight: random_normal()
     )
 
@@ -567,6 +568,11 @@ proc activate(
   elif act == abs:
     return abs(input)
 
+proc rand_activation(): Activation =
+  let activations = Activation.to_seq
+  let rand_activation_index = rand(Activation.high.ord)
+  result = activations[rand_activation_index]
+
 # mutation and crossover
 
 proc tournament(
@@ -666,8 +672,6 @@ proc mutate(
   let top = topologies[top_id]
   let nn = top.population[nn_id]
 
-  let activations = Activation.to_seq
-
   if not satisfy_prob(mutate_prob):
     return
 
@@ -677,12 +681,13 @@ proc mutate(
 
     if meta_node.can_disable and satisfy_prob(add_remove_node_prob):
       meta_node.disabled = meta_node.disabled xor true
+      if not meta_node.disabled:
+        meta_node.bias = 0.0
 
     # mutating an activation on a node
 
     if meta_node.can_change_activation and satisfy_prob(change_activation_prob):
-      let rand_activation_index = rand(Activation.high.ord)
-      meta_node.activation = activations[rand_activation_index]
+      meta_node.activation = rand_activation()
 
     if not meta_node.disabled and satisfy_prob(change_node_bias_prob):
       meta_node.bias += random_normal() * perturb_bias_strength
@@ -696,6 +701,8 @@ proc mutate(
 
     if satisfy_prob(add_remove_edge_prob):
       meta_edge.disabled = meta_edge.disabled xor true
+      if not meta_edge.disabled:
+        meta_edge.weight = 0.0
 
     # changing a weight
 
