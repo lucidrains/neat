@@ -30,7 +30,9 @@ from neat.neat_nim import (
     add_node,
     add_edge,
     mutate,
-    evaluate_nn
+    evaluate_nn,
+    evaluate_nn_single,
+    evaluate_population
 )
 
 from joblib import Parallel, delayed
@@ -142,7 +144,8 @@ class PopulationMLP:
         self,
         *dims,
         pop_size,
-        num_hiddens = 0
+        num_hiddens = 0,
+        weight_norm = True
     ):
         self.dims = dims
         assert len(dims) > 1
@@ -163,6 +166,8 @@ class PopulationMLP:
         self.hyper_weights_nn = hyper_weights_nn
         self.hyper_biases_nn = hyper_biases_nn
 
+        self.weight_norm = weight_norm
+
         self.all_top_ids = [top.id for top in (self.hyper_weights_nn + self.hyper_biases_nn)]
 
         self.generate_hyper_weights_and_biases()
@@ -172,9 +177,10 @@ class PopulationMLP:
         self.weights = [nn.generate_hyper_weights() for nn in self.hyper_weights_nn]
         self.biases = [nn.generate_hyper_weights() for nn in self.hyper_biases_nn]
 
-        # do a weight norm
+        if self.weight_norm:
+            # do a weight norm
 
-        self.weights = [w / jnp.linalg.norm(w, axis = (-1, -2), keepdims = True) for w in self.weights]
+            self.weights = [w / jnp.linalg.norm(w, axis = (-1, -2), keepdims = True) for w in self.weights]
 
     def genetic_algorithm_step(
         self,
