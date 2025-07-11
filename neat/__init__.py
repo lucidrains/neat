@@ -1,5 +1,6 @@
 from neat.neat import (
-    PopulationMLP,
+    HyperNEAT,
+    NEAT,
     Topology,
     mlp
 )

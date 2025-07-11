@@ -4,7 +4,7 @@ from tqdm import tqdm
 
 import jax.numpy as jnp
 
-from neat.neat import PopulationMLP, mlp
+from neat.neat import HyperNEAT, NEAT
 
 # helpers
 
@@ -82,7 +82,7 @@ def record_agent_(
 dim_state = envs.observation_space.shape[-1]
 num_actions = 4
 
-population = PopulationMLP(
+population = HyperNEAT(
     dim_state, 16, 16, num_actions,
 
     num_hiddens = (NUM_CPPN_HIDDEN_NODES,) * NUM_HIDDEN_LAYERS,

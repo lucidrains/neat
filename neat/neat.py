@@ -139,49 +139,7 @@ def mlp(
     weight, bias = weights_biases[-1]
     return einsum(weight, t, '... i o, ... i -> ... o') + bias
 
-class PopulationMLP:
-    def __init__(
-        self,
-        *dims,
-        pop_size,
-        num_hiddens = 0,
-        weight_norm = True
-    ):
-        self.dims = dims
-        assert len(dims) > 1
-
-        self.dim_pairs = list(zip(dims[:-1], dims[1:]))
-        self.pop_size = pop_size
-
-        hyper_weights_nn = []
-        hyper_biases_nn = []
-
-        for dim_in, dim_out in self.dim_pairs:
-            weight_shape = (dim_in, dim_out)
-            bias_shape = (dim_out,)
-
-            hyper_weights_nn.append(Topology(2, 1, pop_size, num_hiddens = num_hiddens, shape = weight_shape))
-            hyper_biases_nn.append(Topology(1, 1, pop_size, num_hiddens = num_hiddens, shape = bias_shape))
-
-        self.hyper_weights_nn = hyper_weights_nn
-        self.hyper_biases_nn = hyper_biases_nn
-
-        self.weight_norm = weight_norm
-
-        self.all_top_ids = [top.id for top in (self.hyper_weights_nn + self.hyper_biases_nn)]
-
-        self.generate_hyper_weights_and_biases()
-
-    def generate_hyper_weights_and_biases(self):
-
-        self.weights = [nn.generate_hyper_weights() for nn in self.hyper_weights_nn]
-        self.biases = [nn.generate_hyper_weights() for nn in self.hyper_biases_nn]
-
-        if self.weight_norm:
-            # do a weight norm
-
-            self.weights = [w / jnp.linalg.norm(w, axis = (-1, -2), keepdims = True) for w in self.weights]
-
+class GeneticAlgorithm:
     def genetic_algorithm_step(
         self,
         fitnesses: Array,
@@ -227,6 +185,56 @@ class PopulationMLP:
 
         Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(mutate)(top_id, nn_id) for top_id, nn_id in product(self.all_top_ids, range(num_preserve_elites, self.pop_size)))
 
+class HyperNEAT(GeneticAlgorithm):
+    def __init__(
+        self,
+        *dims,
+        pop_size,
+        num_hiddens = 0,
+        weight_norm = True
+    ):
+        self.dims = dims
+        assert len(dims) > 1
+
+        self.dim_pairs = list(zip(dims[:-1], dims[1:]))
+        self.pop_size = pop_size
+
+        hyper_weights_nn = []
+        hyper_biases_nn = []
+
+        for dim_in, dim_out in self.dim_pairs:
+            weight_shape = (dim_in, dim_out)
+            bias_shape = (dim_out,)
+
+            hyper_weights_nn.append(Topology(2, 1, pop_size, num_hiddens = num_hiddens, shape = weight_shape))
+            hyper_biases_nn.append(Topology(1, 1, pop_size, num_hiddens = num_hiddens, shape = bias_shape))
+
+        self.hyper_weights_nn = hyper_weights_nn
+        self.hyper_biases_nn = hyper_biases_nn
+
+        self.weight_norm = weight_norm
+
+        self.all_top_ids = [top.id for top in (self.hyper_weights_nn + self.hyper_biases_nn)]
+
+        self.generate_hyper_weights_and_biases()
+
+    def generate_hyper_weights_and_biases(self):
+
+        self.weights = [nn.generate_hyper_weights() for nn in self.hyper_weights_nn]
+        self.biases = [nn.generate_hyper_weights() for nn in self.hyper_biases_nn]
+
+        if self.weight_norm:
+            # do a weight norm
+
+            self.weights = [w / jnp.linalg.norm(w, axis = (-1, -2), keepdims = True) for w in self.weights]
+
+    def genetic_algorithm_step(
+        self,
+        *args,
+        **kwargs
+    ):
+        super().genetic_algorithm_step(*args, **kwargs)
+
         # regenerate hyperweights and biases
 
         self.generate_hyper_weights_and_biases()
@@ -253,6 +261,53 @@ class PopulationMLP:
         temperature = 1.
     ):
         logits = mlp(self.weights, self.biases, state)
+
+        if not sample:
+            return logits
+
+        return gumbel_sample(logits, temperature = temperature)
+
+class NEAT(GeneticAlgorithm):
+    def __init__(
+        self,
+        *dims,
+        pop_size,
+    ):
+        self.dims = dims
+        assert len(dims) >= 2
+
+        self.pop_size = pop_size
+
+        dim_in, *dim_hiddens, dim_out = dims
+
+        self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size)
+        self.all_top_ids = [self.top.id]
+
+    
+    def single_forward(
+        self,
+        index: int,
+        state: Array,
+        sample = False,
+        temperature = 1.
+    ):
+        logits = evaluate_nn_single(self.top.id, index, state.tolist())
+
+        logits = jnp.array(logits)
+
+        if not sample:
+            return logits
+
+        return gumbel_sample(logits, temperature = temperature)
+
+    def forward(
+        self,
+        state: Array,
+        sample = False,
+        temperature = 1.
+    ):
+        logits = evaluate_population(self.top.id, state.tolist())
+        logits = jnp.array(logits)
 
         if not sample:
             return logits
