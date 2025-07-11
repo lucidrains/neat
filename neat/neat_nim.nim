@@ -501,6 +501,23 @@ proc evaluate_nn_single(
 
   return seq_outputs.map(tensor => tensor[0])
 
+proc evaluate_population(
+  top_id: int,
+  inputs: seq[seq[float]]
+): seq[seq[float]] {.exportpy.} =
+
+  let top = topologies[top_id]
+
+  assert inputs.len == top.pop_size
+
+  for nn_id, input in inputs:
+    let nn = top.population[nn_id]
+    echo input.len, nn.num_inputs
+    assert nn.num_inputs == input.len
+
+    let seq_outputs = evaluate_nn_single(top_id, nn_id, input)
+    result.add(seq_outputs)
+
 proc generate_hyper_weights(
   top_id: int,
   nn_id: int,
@@ -860,8 +877,18 @@ proc crossover_and_add_to_population(
 # quick test
 
 when is_main_module:
-  let top_id = add_topology(3, 1, @[16, 16])
-  init_nn(top_id)
-  init_population(top_id, 10)
-  discard generate_hyper_weights(top_id, 0, @[2, 3, 5])
-  remove_topology(top_id)
+  # hyperneat
+
+  let hyperneat_top_id = add_topology(3, 1, @[16, 16])
+  init_nn(hyperneat_top_id)
+  init_population(hyperneat_top_id, 10)
+  discard generate_hyper_weights(hyperneat_top_id, 0, @[2, 3, 5])
+  remove_topology(hyperneat_top_id)
+
+  # regular neat
+
+  let neat_top_id = add_topology(3, 4, @[16, 16])
+  init_nn(neat_top_id)
+  init_population(neat_top_id, 2)
+  discard evaluate_population(neat_top_id, @[@[2.0, 3.0, 5.0], @[3.0, 5.0, 7.0]])
+  remove_topology(neat_top_id)
