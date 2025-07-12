@@ -677,6 +677,7 @@ proc mutate(
   add_remove_node_prob: Prob = 0.05,
   change_activation_prob: Prob = 0.05,
   change_edge_weight_prob: Prob = 0.05,
+  replace_edge_weight_prob: Prob = 0.25, # the perecentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
   change_node_bias_prob: Prob = 0.05,
   decay_edge_weight_prob: Prob = 0.005,
   decay_node_bias_prob: Prob = 0.005,
@@ -722,11 +723,16 @@ proc mutate(
 
     # changing a weight
 
-    if not meta_edge.disabled and satisfy_prob(change_edge_weight_prob):
-      meta_edge.weight += random_normal() * perturb_weight_strength
+    if not meta_edge.disabled:
+      if satisfy_prob(change_edge_weight_prob):
 
-    if not meta_edge.disabled and satisfy_prob(decay_edge_weight_prob):
-      meta_edge.weight *= decay_factor
+        if satisfy_prob(replace_edge_weight_prob):
+          meta_edge.weight = random_normal()
+        else:
+          meta_edge.weight += random_normal() * perturb_weight_strength
+
+      if satisfy_prob(decay_edge_weight_prob):
+        meta_edge.weight *= decay_factor
 
 proc crossover(
   top_id: int,
