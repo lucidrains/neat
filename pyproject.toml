@@ -58,5 +58,5 @@ pythonpath = [
 ]
 
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools", "nimporter"]
 build-backend = "setuptools.build_meta"
