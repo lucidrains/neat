@@ -8,7 +8,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - name: Checkout
@@ -39,4 +39,4 @@ jobs:
 
       - name: Build Wheels
         run: |
-          python -m build --wheel
+          python -m build
