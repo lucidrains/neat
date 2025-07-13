@@ -24,7 +24,8 @@ jobs:
 
       - name: Add Nimble to PATH and Run cibuildwheel
         run: |
-          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+          echo "/home/runner/work/neat/neat/.nim_runtime/bin" >> "$GITHUB_PATH"
+          echo $PATH
 
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==2.23.3
