@@ -16,7 +16,13 @@ jobs:
       # Used to host cibuildwheel
       - uses: actions/setup-python@v5
 
+      - name: Install Nim on Mac OS
+        if: runner.os == 'macOS'
+        run: |
+          brew install nim
+
       - name: Install Nim
+        if: runner.os == 'Linux' || runner.os == 'Windows'
         uses: jiro4989/setup-nim-action@v2
         with:
           nim-version: '2.2.4'
