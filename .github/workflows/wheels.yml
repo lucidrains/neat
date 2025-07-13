@@ -16,6 +16,7 @@ jobs:
         if: runner.os == 'Linux' || runner.os == 'macOS'
 
       - name: Checkout with new path # issue with windows path too long during compilation
+        uses: actions/checkout@v4
         if: runner.os == 'Windows'
         with:
           path: C:/tmp
