@@ -34,4 +34,5 @@ jobs:
 
       - name: Build Wheels
         run: |
+          nimble install -y
           python -m build
