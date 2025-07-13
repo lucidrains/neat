@@ -4,7 +4,7 @@ on: [push, pull_request]
 jobs:
   build:
 
-    runs-on: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
@@ -13,13 +13,7 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install Nim on Mac OS
-      if: runner.os == 'macOS'
-      run: |
-        brew install nim
-
     - name: Install Nim
-      if: runner.os == 'Linux'
       uses: jiro4989/setup-nim-action@v2
       with:
         nim-version: '2.2.4'
