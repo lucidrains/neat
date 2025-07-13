@@ -8,31 +8,35 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # Used to host cibuildwheel
-      - uses: actions/setup-python@v5
+      - name: Install Nim on Mac OS
+        if: runner.os == 'macOS'
+        run: |
+          brew install nim
 
       - name: Install Nim
+        if: runner.os == 'Linux' || runner.os == 'Windows'
         uses: jiro4989/setup-nim-action@v2
         with:
           nim-version: '2.2.4'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.23.3
-
-      - name: Build wheels
-        run: python -m cibuildwheel --output-dir wheelhouse
-        # to supply options, put them in 'env', like:
-        # env:
-        #   CIBW_SOME_OPTION: value
-        #   ...
-
-      - uses: actions/upload-artifact@v4
+      - name: Set up Python
+        uses: actions/setup-python@v2
         with:
-          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
-          path: ./wheelhouse/*.whl
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+          nimble install -y
+
+      - name: Build Wheels
+        run: |
+          python -m build
