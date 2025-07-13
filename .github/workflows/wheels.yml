@@ -31,11 +31,6 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Enable long paths
-        if: runner.os == 'Windows'
-        run: Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1
-        shell: pwsh
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -44,4 +39,4 @@ jobs:
       - name: Build Wheels
         run: |
           nimble install -y
-          python -m build
+          python -m build --no-use-pep517
