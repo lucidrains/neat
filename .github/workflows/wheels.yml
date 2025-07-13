@@ -38,11 +38,5 @@ jobs:
           nimble install -y
 
       - name: Build Wheels
-        if: runner.os == 'macOS' || runner.os == 'Linux'
         run: |
-          python -m build
-
-      - name: Build Wheels Windows
-        if: runner.os == 'Windows'
-        run: |
-          python -m build --no-use-pep517
+          python -m build --wheel
