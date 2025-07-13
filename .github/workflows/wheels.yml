@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         if: runner.os == 'Windows'
         with:
-          path: C:/tmp
+          path: D:\a\neat\neat
 
       - name: Install Nim on Mac OS
         if: runner.os == 'macOS'
