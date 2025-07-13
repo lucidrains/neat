@@ -38,7 +38,7 @@ jobs:
           nimble install -y
 
       - name: Build Wheels
-        if: runner.os == 'Windows'
+        if: runner.os == 'macOS' || runner.os == 'Linux'
         run: |
           python -m build
 
