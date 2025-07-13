@@ -35,8 +35,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install build
+          nimble install -y
 
       - name: Build Wheels
+        if: runner.os == 'Windows'
         run: |
-          nimble install -y
+          python -m build
+
+      - name: Build Wheels Windows
+        if: runner.os == 'Windows'
+        run: |
           python -m build --no-use-pep517
