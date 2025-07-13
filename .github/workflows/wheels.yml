@@ -11,10 +11,14 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout without new path
+        uses: actions/checkout@v4
+        if: runner.os == 'Linux' || runner.os == 'macOS'
 
-      # Used to host cibuildwheel
-      - uses: actions/setup-python@v5
+      - name: Checkout with new path # issue with windows path too long during compilation
+        if: runner.os == 'Windows'
+        with:
+          path: C:/tmp
 
       - name: Install Nim on Mac OS
         if: runner.os == 'macOS'
