@@ -1000,7 +1000,11 @@ proc crossover(
     disjoint_node_ids = (parent1_node_set - parent2_node_set).to_seq
     disjoint_edge_ids = (parent1_edge_set - parent2_edge_set).to_seq
 
-  # joint nodes / edges
+  # new child node index
+
+  var child_node_index = init_table[int, int]()
+
+  # handle joint nodes
 
   for node_id in joint_node_ids:
 
@@ -1009,7 +1013,24 @@ proc crossover(
     else:
       parent2_nodes_index[node_id]
 
-    child_nodes.add(rand_node)
+    let new_node = MetaNode()
+    new_node[] = rand_node[]
+
+    child_node_index[new_node.node_id] = child_nodes.len
+    child_nodes.add(new_node)
+
+  # handle node disjoint / excess genes
+
+  for node_id in disjoint_node_ids:
+    let disjoint_node = disjoint_nodes_index[node_id]
+
+    let new_node = MetaNode()
+    new_node[] = disjoint_node[]
+
+    child_node_index[new_node.node_id] = child_nodes.len
+    child_nodes.add(new_node)
+
+  # handle joint edges
 
   for edge_id in joint_edge_ids:
 
@@ -1018,15 +1039,42 @@ proc crossover(
     else:
       parent2_edges_index[edge_id]
 
-    child_edges.add(rand_edge)
+    let new_edge = MetaEdge()
+    new_edge[] = rand_edge[]
 
-  # handle disjoint / excess genes
+    let edge = new_edge.get_parent_edge()
 
-  for node_id in disjoint_node_ids:
-    child_nodes.add(disjoint_nodes_index[node_id])
+    if (
+      edge.from_node_id notin child_node_index or
+      edge.to_node_id notin child_node_index
+    ):
+      continue
+
+    new_edge.local_from_node_id = child_node_index[edge.from_node_id]
+    new_edge.local_to_node_id = child_node_index[edge.to_node_id]
+
+    child_edges.add(new_edge)
+
+  # handle edges disjoint / excess genes
 
   for edge_id in disjoint_edge_ids:
-    child_edges.add(disjoint_edges_index[edge_id])
+    let disjoint_edge = disjoint_edges_index[edge_id]
+
+    let new_edge = MetaEdge()
+    new_edge[] = disjoint_edge[]
+
+    let edge = new_edge.get_parent_edge()
+
+    if (
+      edge.from_node_id notin child_node_index or
+      edge.to_node_id notin child_node_index
+    ):
+      continue
+
+    new_edge.local_from_node_id = child_node_index[edge.from_node_id]
+    new_edge.local_to_node_id = child_node_index[edge.to_node_id]
+
+    child_edges.add(new_edge)
 
   # add child to population
 
@@ -1080,6 +1128,8 @@ when is_main_module:
   let hyperneat_top_id = add_topology(3, 1, @[16, 16])
   init_nn(hyperneat_top_id)
   init_population(hyperneat_top_id, 10)
+  discard crossover(hyperneat_top_id, 0, 1, 0.5, 0.3)
+
   mutate(hyperneat_top_id, nn_id = 0, mutate_prob = 1.0, grow_edge_prob = 1.0)
   discard generate_hyper_weights(hyperneat_top_id, 0, @[2, 3, 5])
   remove_topology(hyperneat_top_id)
