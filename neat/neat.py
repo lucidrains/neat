@@ -131,8 +131,13 @@ def mlp(
     weights_biases = list(zip(weights, biases))
 
     for weight, bias in weights_biases[:-1]:
+        residual = t
+
         t = einsum(weight, t, '... i o, ... i -> ... o') + bias
         t = nn.relu(t)
+
+        if residual.shape[-1] == t.shape[-1]:
+            t = t + residual
 
     # last layer
 
