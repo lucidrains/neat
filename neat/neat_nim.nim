@@ -723,7 +723,7 @@ proc mutate(
   add_remove_node_prob: Prob = 0.05,
   change_activation_prob: Prob = 0.05,
   change_edge_weight_prob: Prob = 0.05,
-  replace_edge_weight_prob: Prob = 0.25,   # the perecentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
+  replace_edge_weight_prob: Prob = 0.25,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
   change_node_bias_prob: Prob = 0.05,
   decay_edge_weight_prob: Prob = 0.005,
   decay_node_bias_prob: Prob = 0.005,
@@ -791,7 +791,7 @@ proc mutate(
 
     meta_node.disabled = meta_node.disabled xor true
     if not meta_node.disabled:
-      meta_node.bias = 0.0
+      meta_node.bias = random_normal()
 
   # mutating edges
 
@@ -895,7 +895,7 @@ proc mutate(
 
     meta_edge.disabled = meta_edge.disabled xor true
     if not meta_edge.disabled:
-      meta_edge.weight = 0.0
+      meta_edge.weight = random_normal()
 
 proc crossover(
   top_id: int,
@@ -970,8 +970,8 @@ proc crossover(
     disjoint_edge_ids: seq[int] = @[]
 
   if fitness_difference <= fitness_diff_is_same:
-    joint_node_ids &= (parent1_node_set -+- parent2_node_set).to_seq
-    joint_edge_ids &= (parent1_edge_set -+- parent2_edge_set).to_seq
+    joint_node_ids &= (parent1_node_set * parent2_node_set).to_seq
+    joint_edge_ids &= (parent1_edge_set * parent2_edge_set).to_seq
 
   elif first_parent_fitness < second_parent_fitness:
     disjoint_nodes_index = parent2_nodes_index
