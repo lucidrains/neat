@@ -2,6 +2,8 @@ import nimpy
 
 import std/[
   random,
+  times,
+  strformat,
   assertions,
   math,
   sequtils,
@@ -879,9 +881,23 @@ proc crossover_and_add_to_population(
 
     top.population.add(child)
 
+# simple benchmarking
+
+template benchmark(trials: int, code: untyped) =
+  var result = 0.0
+
+  for _ in 0..<trials:
+    let start_time = epoch_time()
+    code
+    let diff = epoch_time() - start_time
+    result += diff / trials
+
+  echo "average time over " & $trials & " trials is " & $result
+
 # quick test
 
 when is_main_module:
+
   # hyperneat
 
   let hyperneat_top_id = add_topology(3, 1, @[16, 16])
