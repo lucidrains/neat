@@ -11,6 +11,7 @@ import std/[
   setutils,
   tables,
   sugar,
+  segfaults,
   algorithm
 ]
 
@@ -141,6 +142,8 @@ type
 
   Topology = ref object
     id: int
+    lock: Lock
+
     nodes: seq[Node] = @[] # nodes will be always arrange [input] [output] [hiddens]
     edges: seq[Edge] = @[]
 
@@ -202,6 +205,10 @@ proc add_topology(
   topologies[topology_id] = topology
 
   topology_id += 1
+
+  # init lock
+
+  topology.lock.init_lock()
 
   # create input and output nodes
 
@@ -719,15 +726,15 @@ proc mutate(
   top_id: int,
   nn_id: int,
   mutate_prob: Prob = 0.8,
-  add_remove_edge_prob: Prob = 0.05,
-  add_remove_node_prob: Prob = 0.05,
-  change_activation_prob: Prob = 0.05,
-  change_edge_weight_prob: Prob = 0.05,
+  add_remove_edge_prob: Prob = 0.01,
+  add_remove_node_prob: Prob = 0.01,
+  change_activation_prob: Prob = 0.01,
+  change_edge_weight_prob: Prob = 0.01,
   replace_edge_weight_prob: Prob = 0.25,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
-  change_node_bias_prob: Prob = 0.05,
-  decay_edge_weight_prob: Prob = 0.005,
-  decay_node_bias_prob: Prob = 0.005,
-  grow_edge_prob: Prob = 0.025,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  change_node_bias_prob: Prob = 0.051,
+  decay_edge_weight_prob: Prob = 0.0,
+  decay_node_bias_prob: Prob = 0.0,
+  grow_edge_prob: Prob = 0.001,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
   perturb_weight_strength: Prob = 0.25,
   perturb_bias_strength: Prob = 0.25,
@@ -825,6 +832,10 @@ proc mutate(
 
       meta_edge.disabled = true
 
+      # acquire lock
+
+      top.lock.acquire()
+
       # add a new innovated node
 
       let node_id = add_node(top_id)
@@ -835,6 +846,10 @@ proc mutate(
 
       discard add_edge(top_id, edge.from_node_id, node_id)
       discard add_edge(top_id, node_id, edge.to_node_id)
+
+      # release
+
+      top.lock.release()
 
       # now add the meta nodes and edges for this particular neural network instantiation
 
