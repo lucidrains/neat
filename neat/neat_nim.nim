@@ -18,6 +18,8 @@ import bitvector
 
 import arraymancer
 
+import taskpools
+
 type
   Prob = range[0.0..1.0]
 
