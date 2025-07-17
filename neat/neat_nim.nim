@@ -718,17 +718,17 @@ proc select_and_tournament(
 proc mutate(
   top_id: int,
   nn_id: int,
-  mutate_prob: Prob = 0.4,
+  mutate_prob: Prob = 0.8,
   add_remove_edge_prob: Prob = 0.05,
   add_remove_node_prob: Prob = 0.05,
   change_activation_prob: Prob = 0.05,
   change_edge_weight_prob: Prob = 0.05,
-  replace_edge_weight_prob: Prob = 0.25, # the perecentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
+  replace_edge_weight_prob: Prob = 0.25,   # the perecentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
   change_node_bias_prob: Prob = 0.05,
   decay_edge_weight_prob: Prob = 0.005,
   decay_node_bias_prob: Prob = 0.005,
-  grow_edge_prob: Prob = 0.05,           # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
-  grow_node_prob: Prob = 0.05,           # similarly, some follow up research do a variation of the above and split an existing node into two nodes
+  grow_edge_prob: Prob = 0.025,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
   perturb_weight_strength: Prob = 0.25,
   perturb_bias_strength: Prob = 0.25,
   decay_factor: float = 0.95
@@ -740,16 +740,13 @@ proc mutate(
   if not satisfy_prob(mutate_prob):
     return
 
+  var node_index = init_table[int, int]()
+  var edge_index = init_table[int, int]()
+
   # mutating nodes
 
-  for meta_node in nn.meta_nodes:
-
-    # add or removing an existing node, if valid (input and output nodes are preserved)
-
-    if meta_node.can_disable and satisfy_prob(add_remove_node_prob):
-      meta_node.disabled = meta_node.disabled xor true
-      if not meta_node.disabled:
-        meta_node.bias = 0.0
+  for local_node_id, meta_node in nn.meta_nodes:
+    node_index[meta_node.node_id] = local_node_id
 
     # mutating an activation on a node
 
@@ -765,18 +762,44 @@ proc mutate(
     if satisfy_prob(decay_node_bias_prob):
       meta_node.bias *= decay_factor
 
+  # add / remove node
+
+  for node in top.nodes:
+    # enabling / disabling an edge
+
+    if not satisfy_prob(add_remove_node_prob):
+      continue
+
+    if node.id notin node_index:
+      let new_meta_node = MetaNode(
+        topology_id: top.id,
+        activation: rand_activation(),
+        can_disable: false, # only inputs and outputs are locked
+        disabled: true
+      )
+
+      node_index[node.id] = nn.meta_nodes.len
+      nn.meta_nodes.add(new_meta_node)
+
+    let meta_node_id = node_index[node.id]
+    let meta_node = nn.meta_nodes[meta_node_id]
+
+    # add or removing an existing node, if valid (input and output nodes are preserved)
+
+    if not meta_node.can_disable:
+      continue
+
+    meta_node.disabled = meta_node.disabled xor true
+    if not meta_node.disabled:
+      meta_node.bias = 0.0
+
   # mutating edges
 
   for meta_edge_index in 0..<nn.meta_edges.len:
 
     let meta_edge = nn.meta_edges[meta_edge_index]
 
-    # enabling / disabling an edge
-
-    if satisfy_prob(add_remove_edge_prob):
-      meta_edge.disabled = meta_edge.disabled xor true
-      if not meta_edge.disabled:
-        meta_edge.weight = 0.0
+    edge_index[meta_edge.edge_id] = meta_edge_index
 
     # changing a weight
 
@@ -841,6 +864,38 @@ proc mutate(
       )
 
       nn.meta_edges.add(meta_edge_outgoing)
+
+  # add / remove edge
+
+  for edge in top.edges:
+    # enabling / disabling an edge
+
+    if not satisfy_prob(add_remove_edge_prob):
+      continue
+
+    if (
+      edge.from_node_id notin node_index or
+      edge.to_node_id notin node_index
+    ):
+      continue
+
+    if edge.id notin edge_index:
+      let new_meta_edge = MetaEdge(
+        topology_id: top.id,
+        local_from_node_id: node_index[edge.from_node_id],
+        local_to_node_id: node_index[edge.to_node_id],
+        disabled: true
+      )
+
+      edge_index[edge.id] = nn.meta_edges.len
+      nn.meta_edges.add(new_meta_edge)
+
+    let meta_edge_id = edge_index[edge.id]
+    let meta_edge = nn.meta_edges[meta_edge_id]
+
+    meta_edge.disabled = meta_edge.disabled xor true
+    if not meta_edge.disabled:
+      meta_edge.weight = 0.0
 
 proc crossover(
   top_id: int,

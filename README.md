@@ -2,7 +2,6 @@
 
 Explorations into NEAT and some of its derivative research
 
-
 ## quick test
 
 ```bash
