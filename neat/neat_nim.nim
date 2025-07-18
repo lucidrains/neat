@@ -12,6 +12,7 @@ import std/[
   tables,
   sugar,
   segfaults,
+  locks,
   algorithm
 ]
 
@@ -19,7 +20,6 @@ import bitvector
 
 import arraymancer
 
-import std/locks
 import weave
 
 type
@@ -28,6 +28,24 @@ type
 # init
 
 randomize()
+
+# templates
+
+template with_weave(code: untyped) =
+  Weave.init()
+  code
+  Weave.exit()
+
+template benchmark(trials: int, code: untyped) =
+  var result = 0.0
+
+  for _ in 0..<trials:
+    let start_time = epoch_time()
+    code
+    let diff = epoch_time() - start_time
+    result += diff / trials
+
+  echo "average time over " & $trials & " trials is " & $result
 
 # functions
 
@@ -546,6 +564,190 @@ proc evaluate_nn(
 
     result.add(output_value.to_seq)
 
+# caching graph execution trace
+
+type
+  NumNodesInfo = tuple
+    num_inputs: int
+    num_outputs: int
+    num_nodes: int
+
+  WeightUpdate = tuple
+    weight: float
+    from_node_id: int
+
+  NodeUpdate = tuple
+    to_node_id: int
+    activation_id: int
+    bias: float
+    trace: seq[WeightUpdate]
+
+  ExecTrace = tuple
+    node_info: NumNodesInfo
+    node_updatess: seq[NodeUpdate]
+
+proc evaluate_nn_exec_trace(
+  top_id: int,
+  nn_id: int,
+): ExecTrace {.exportpy.} =
+
+  var trace = new_seq[NodeUpdate]()
+
+  let top = topologies[top_id]
+  let nn = top.population[nn_id]
+
+  let num_nodes = nn.meta_nodes.len
+
+  var visited = new_bit_vector[uint](num_nodes)
+  var finished = new_bit_vector[uint](num_nodes)
+
+  # global to local node indices
+
+  var node_index = init_table[int, int]()
+
+  # global edge index to local node from and to index
+
+  var edge_index = init_table[int, (int, int)]()
+
+  for local_node_index, meta_node in nn.meta_nodes:
+
+    if meta_node.disabled:
+      continue
+
+    node_index[meta_node.node_id] = local_node_index
+
+  for edge in top.edges:
+    if node_index.has_key(edge.from_node_id) and node_index.has_key(edge.to_node_id):
+
+      edge_index[edge.id] = (
+        node_index[edge.from_node_id],
+        node_index[edge.to_node_id],
+      )
+
+  # set the values of inputs
+
+  for i in 0..<nn.num_inputs:
+    let node_index = i + num_nodes # external inputs placed at the end
+    let input_node = nn.meta_nodes[i]
+
+    finished[i] = 1
+
+    trace.add((
+      i,
+      input_node.activation.ord,
+      0.0,
+      @[(1.0, node_index)]
+    ))
+
+  # proc for fetching value of node at a given meta node index
+
+  proc compute_node_value(
+    index: int,
+    visited: BitVector,
+    trace: var seq[NodeUpdate]
+  ) =
+
+    if finished[index] == 1:
+      return
+
+    let meta_node = nn.meta_nodes[index]
+
+    # start with bias
+
+    var next_visited = visited
+    next_visited[index] = 1
+
+    # find all edges
+
+    var input_node_index_and_weight: seq[(float, int)] = @[] # omit visited
+
+    for meta_edge in nn.meta_edges:
+      if meta_edge.disabled:
+        continue
+
+      if not edge_index.has_key(meta_edge.edge_id):
+        # node may be disabled above
+        continue
+
+      let (local_from_node_id, local_to_node_id) = edge_index[meta_edge.edge_id]
+
+      if local_to_node_id != index:
+        continue
+
+      let meta_node = nn.meta_nodes[local_from_node_id]
+
+      if next_visited[local_from_node_id] == 1:
+        continue
+
+      if meta_node.disabled:
+        continue
+
+      input_node_index_and_weight.add((meta_edge.weight, local_from_node_id))
+
+    # get weighted sum of inputs to the node
+
+    var multiplies: seq[(float, int)] = @[]
+
+    for entry in input_node_index_and_weight:
+      let (weight, local_from_node_id) = entry
+      compute_node_value(local_from_node_id, next_visited, trace)
+      multiplies.add((weight, local_from_node_id))
+
+    # activation
+
+    finished[index] = 1
+
+    trace.add((
+      index,
+      meta_node.activation.ord,
+      meta_node.bias,
+      multiplies
+    ))
+
+  # compute outputs
+
+  for i in 0..<nn.num_outputs:
+    let output_index = nn.num_inputs + i
+    compute_node_value(output_index, visited, trace)
+
+  return ((top.num_inputs, top.num_outputs, num_nodes), trace)
+
+proc evaluate_nn_single_with_trace(
+  trace_with_meta_info: (NumNodesInfo, seq[NodeUpdate]),
+  inputs: seq[float]
+): seq[float] {.exportpy.} =
+
+  var (meta_info, trace) = trace_with_meta_info
+  let (num_inputs, num_outputs, num_nodes) = meta_info
+
+  let seq_inputs = inputs.map(value => @[value])
+
+  let seq_inputs_tensor = seq_inputs.map(seq_float => seq_float.to_tensor)
+
+  let one_input = seq_inputs_tensor[0]
+  let one_input_shape = one_input.shape
+
+  var values = new_seq[Tensor[float]](num_nodes)
+
+  for i in 0 ..< values.len:
+    values[i] = zeros[float](one_input_shape)
+
+  values &= seq_inputs_tensor
+
+  for update_node in trace:
+    let (to_id, act_index, bias, incoming_weights) = update_node
+
+    values[to_id] = values[to_id] +. bias
+
+    for incoming_weight in incoming_weights:
+      let (weight, from_id) = incoming_weight
+      values[to_id] += weight * values[from_id]
+
+    values[to_id] = Activation(act_index).activate(values[to_id])
+
+  let seq_outputs = values[num_inputs ..< (num_inputs + num_outputs)]
+  return seq_outputs.map(tensor => tensor[0])
+
 proc evaluate_nn_single(
   top_id: int,
   nn_id: int,
@@ -588,7 +790,7 @@ proc generate_hyper_weights(
     first_axis = shape[0]
     rest_axis = shape[1..^1]
 
-  var coors = linspace(0.0, 1.0, shape[0])
+  var coors = linspace(-1.0, 1.0, shape[0])
   coors = coors.reshape(1, first_axis)
 
   for dim in rest_axis:
@@ -1110,19 +1312,6 @@ proc crossover_and_add_to_population(
 
     top.population.add(child)
 
-# simple benchmarking
-
-template benchmark(trials: int, code: untyped) =
-  var result = 0.0
-
-  for _ in 0..<trials:
-    let start_time = epoch_time()
-    code
-    let diff = epoch_time() - start_time
-    result += diff / trials
-
-  echo "average time over " & $trials & " trials is " & $result
-
 # quick test
 
 when is_main_module:
@@ -1132,6 +1321,13 @@ when is_main_module:
   let hyperneat_top_id = add_topology(3, 1, @[16, 16])
   init_nn(hyperneat_top_id)
   init_population(hyperneat_top_id, 10)
+
+  let output1 = evaluate_nn_single(hyperneat_top_id, 0, @[2.0, 3.0, 5.0])
+  let trace = evaluate_nn_exec_trace(hyperneat_top_id, 0)
+  let output2 = evaluate_nn_single_with_trace(trace, @[2.0, 3.0, 5.0])
+
+  assert output1 == output2
+
   discard crossover(hyperneat_top_id, 0, 1, 0.5, 0.3)
 
   mutate(hyperneat_top_id, nn_id = 0, mutate_prob = 1.0, grow_edge_prob = 1.0)

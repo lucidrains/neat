@@ -24,7 +24,7 @@ NUM_GENERATIONS = 1000
 TEST_REGULAR_NEAT = True
 POP_SIZE = 100
 NUM_CPPN_HIDDEN_NODES = 16
-NUM_HIDDEN_LAYERS = 1
+NUM_HIDDEN_LAYERS = 0
 
 RECORD_EVERY = 10
 MAX_EPISODE_LEN = 250
@@ -87,7 +87,7 @@ num_actions = 4
 
 if TEST_REGULAR_NEAT:
     population = NEAT(
-        dim_state, 16, 16, num_actions,
+        dim_state, *((NUM_CPPN_HIDDEN_NODES,) * NUM_HIDDEN_LAYERS), num_actions,
         pop_size = POP_SIZE
     )
 else:
