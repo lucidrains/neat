@@ -206,10 +206,6 @@ proc add_topology(
 
   topology_id += 1
 
-  # init lock
-
-  topology.lock.init_lock()
-
   # create input and output nodes
 
   let
@@ -256,6 +252,14 @@ proc add_topology(
 
 proc remove_topology(topology_id: int) {.exportpy.} =
   topologies.del(topology_id)
+
+proc init_top_lock(topology_id: int) {.exportpy.} =
+  let top = topologies[topology_id]
+  top.lock.init_lock()
+
+proc deinit_top_lock(topology_id: int) {.exportpy.} =
+  let top = topologies[topology_id]
+  top.lock.deinit_lock()
 
 proc add_node(
   topology_id: int,

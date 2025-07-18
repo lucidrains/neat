@@ -24,6 +24,8 @@ from neat.neat_nim import (
     add_topology,
     remove_topology,
     init_population as init_population_nim,
+    init_top_lock,
+    deinit_top_lock,
     generate_hyper_weights as generate_hyper_weights_nim,
     crossover_and_add_to_population,
     select_and_tournament,
@@ -188,7 +190,13 @@ class GeneticAlgorithm:
 
         # 5. mutation
 
+        for top_id in self.all_top_ids:
+            init_top_lock(top_id)
+
         Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(mutate)(top_id, nn_id) for top_id, nn_id in product(self.all_top_ids, range(num_preserve_elites, self.pop_size)))
+
+        for top_id in self.all_top_ids:
+            deinit_top_lock(top_id)
 
 class HyperNEAT(GeneticAlgorithm):
     def __init__(
