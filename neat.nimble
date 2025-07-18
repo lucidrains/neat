@@ -9,6 +9,6 @@ license       = "MIT"
 
 requires "arraymancer >= 0.7.33"
 requires "bitvector"
-requires "taskpools"
+requires "weave"
 requires "nim >= 2.2.4"
 requires "nimpy >= 0.2.1"

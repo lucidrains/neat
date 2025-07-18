@@ -20,7 +20,7 @@ import bitvector
 import arraymancer
 
 import std/locks
-import taskpools
+import weave
 
 type
   Prob = range[0.0..1.0]
