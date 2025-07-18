@@ -4,6 +4,7 @@ import std/[
   random,
   times,
   strformat,
+  options,
   assertions,
   math,
   sequtils,
@@ -36,7 +37,11 @@ template with_weave(code: untyped) =
   code
   Weave.exit()
 
-template benchmark(trials: int, code: untyped) =
+template benchmark(
+  name: string,
+  trials: int,
+  code: untyped
+) =
   var result = 0.0
 
   for _ in 0..<trials:
@@ -45,7 +50,7 @@ template benchmark(trials: int, code: untyped) =
     let diff = epoch_time() - start_time
     result += diff / trials
 
-  echo "average time over " & $trials & " trials is " & $result
+  echo name & ": average time over " & $trials & " trials is " & $(result * 1e3) & " ms"
 
 # functions
 
@@ -118,6 +123,25 @@ type
 # types
 
 type
+  NumNodesInfo = tuple
+    num_inputs: int
+    num_outputs: int
+    num_nodes: int
+
+  WeightUpdate = tuple
+    weight: float
+    from_node_id: int
+
+  NodeUpdate = tuple
+    to_node_id: int
+    activation_id: int
+    bias: float
+    trace: seq[WeightUpdate]
+
+  ExecTrace = tuple
+    node_info: NumNodesInfo
+    node_updatess: seq[NodeUpdate]
+
   NodeType = enum
     input, output, hidden
 
@@ -157,6 +181,7 @@ type
     num_hiddens: seq[int] = @[]
     meta_nodes: seq[MetaNode] = @[]
     meta_edges: seq[MetaEdge] = @[]
+    cached_exec_trace: Option[ExecTrace]
 
   Topology = ref object
     id: int
@@ -566,26 +591,6 @@ proc evaluate_nn(
 
 # caching graph execution trace
 
-type
-  NumNodesInfo = tuple
-    num_inputs: int
-    num_outputs: int
-    num_nodes: int
-
-  WeightUpdate = tuple
-    weight: float
-    from_node_id: int
-
-  NodeUpdate = tuple
-    to_node_id: int
-    activation_id: int
-    bias: float
-    trace: seq[WeightUpdate]
-
-  ExecTrace = tuple
-    node_info: NumNodesInfo
-    node_updatess: seq[NodeUpdate]
-
 proc evaluate_nn_exec_trace(
   top_id: int,
   nn_id: int,
@@ -712,17 +717,15 @@ proc evaluate_nn_exec_trace(
 
   return ((top.num_inputs, top.num_outputs, num_nodes), trace)
 
-proc evaluate_nn_single_with_trace(
-  trace_with_meta_info: (NumNodesInfo, seq[NodeUpdate]),
-  inputs: seq[float]
-): seq[float] {.exportpy.} =
+proc evaluate_nn_with_trace(
+  trace_with_meta_info: ExecTrace,
+  inputs: seq[seq[float]]
+): seq[seq[float]] {.exportpy.} =
 
   var (meta_info, trace) = trace_with_meta_info
   let (num_inputs, num_outputs, num_nodes) = meta_info
 
-  let seq_inputs = inputs.map(value => @[value])
-
-  let seq_inputs_tensor = seq_inputs.map(seq_float => seq_float.to_tensor)
+  let seq_inputs_tensor = inputs.map(seq_float => seq_float.to_tensor)
 
   let one_input = seq_inputs_tensor[0]
   let one_input_shape = one_input.shape
@@ -746,19 +749,30 @@ proc evaluate_nn_single_with_trace(
     values[to_id] = Activation(act_index).activate(values[to_id])
 
   let seq_outputs = values[num_inputs ..< (num_inputs + num_outputs)]
-  return seq_outputs.map(tensor => tensor[0])
+
+  return seq_outputs.map(tensor => tensor.to_seq)
 
 proc evaluate_nn_single(
   top_id: int,
   nn_id: int,
-  inputs: seq[float]
+  inputs: seq[float],
+  use_exec_cache: bool = false
 ): seq[float] {.exportpy.} =
 
   let seq_inputs = inputs.map(value => @[value])
 
-  let seq_outputs = evaluate_nn(top_id, nn_id, seq_inputs)
+  let top = topologies[top_id]
+  let nn = top.population[nn_id]
 
-  return seq_outputs.map(tensor => tensor[0])
+  if use_exec_cache and nn.cached_exec_trace.is_none:
+    nn.cached_exec_trace = evaluate_nn_exec_trace(top_id, nn_id).some
+
+  let outputs = if use_exec_cache:
+    evaluate_nn_with_trace(nn.cached_exec_trace.get, seq_inputs)
+  else:
+    evaluate_nn(top_id, nn_id, seq_inputs)
+
+  return outputs.map(tensor => tensor[0])
 
 proc evaluate_population(
   top_id: int,
@@ -1118,6 +1132,11 @@ proc mutate(
     if not meta_edge.disabled:
       meta_edge.weight = random_normal()
 
+  # just remove cached trace for now
+  # properly detect change in future
+
+  nn.cached_exec_trace = none(ExecTrace)
+
 proc crossover(
   top_id: int,
   first_parent_nn_id: int,
@@ -1318,15 +1337,21 @@ when is_main_module:
 
   # hyperneat
 
-  let hyperneat_top_id = add_topology(3, 1, @[16, 16])
+  let hyperneat_top_id = add_topology(3, 1, @[16, 16, 16])
   init_nn(hyperneat_top_id)
   init_population(hyperneat_top_id, 10)
 
   let output1 = evaluate_nn_single(hyperneat_top_id, 0, @[2.0, 3.0, 5.0])
   let trace = evaluate_nn_exec_trace(hyperneat_top_id, 0)
-  let output2 = evaluate_nn_single_with_trace(trace, @[2.0, 3.0, 5.0])
+  let output2 = evaluate_nn_single(hyperneat_top_id, 0, @[2.0, 3.0, 5.0], use_exec_cache = true)
 
   assert output1 == output2
+
+  benchmark("non cached", 100):
+    discard evaluate_nn_single(hyperneat_top_id, 0, @[2.0, 3.0, 5.0])
+
+  benchmark("cached", 100):
+    discard evaluate_nn_single(hyperneat_top_id, 0, @[2.0, 3.0, 5.0], use_exec_cache = true)
 
   discard crossover(hyperneat_top_id, 0, 1, 0.5, 0.3)
 

@@ -320,7 +320,7 @@ class NEAT(GeneticAlgorithm):
         temperature = 1.,
         n_jobs = -1
     ):
-        logits = Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(evaluate_nn_single)(self.top.id, nn_id, one_state.tolist()) for nn_id, one_state in zip(range(self.pop_size), state))
+        logits = Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(evaluate_nn_single)(self.top.id, nn_id, one_state.tolist(), use_exec_cache = True) for nn_id, one_state in zip(range(self.pop_size), state))
         logits = jnp.array(logits)
 
         if not sample:
