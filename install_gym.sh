@@ -20,4 +20,6 @@ pip install uv
 
 # python dep
 
+export UV_HTTP_TIMEOUT=60
+
 uv pip install '.[gym]' --system

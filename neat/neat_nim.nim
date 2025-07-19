@@ -804,40 +804,35 @@ proc evaluate_population(
 
   assert inputs.len == top.pop_size
 
+  result = new_seq_with(top.population.len, new_seq[float](top.num_outputs))
+
   # using weave for multi-threading
 
   with_weave():
 
-    for nn_id, input in inputs:
+    sync_scope():
+      for nn_id, input in inputs:
 
-      let nn = top.population[nn_id]
-      assert nn.num_inputs == input.len
+        let nn = top.population[nn_id]
+        assert nn.num_inputs == input.len
 
-      # set the cached graph execution on neural network if not exists (it has been mutated)
+        # set the cached graph execution on neural network if not exists (it has been mutated)
 
-      if nn.cached_exec_trace.is_none:
-        nn.cached_exec_trace = evaluate_nn_exec_trace(top_id, nn_id).some
+        if nn.cached_exec_trace.is_none:
+          nn.cached_exec_trace = evaluate_nn_exec_trace(top_id, nn_id).some
 
-      let output = new_seq[float](top.num_outputs)
+        # input and output buffers for thread
 
-      # input and output buffers for thread
+        let buffer_input = cast[ptr UncheckedArray[float]](input[0].unsafe_addr)
+        let buffer_output = cast[ptr UncheckedArray[float]](result[nn_id][0].addr)
 
-      let buffer_input = cast[ptr UncheckedArray[float]](input[0].unsafe_addr)
-      let buffer_output = cast[ptr UncheckedArray[float]](output[0].addr)
+        # spawn thread
 
-      # spawn thread
-
-      spawn evaluate_nn_single_with_trace_thread_fn(
-        nn.cached_exec_trace.get.addr,
-        buffer_input,
-        buffer_output
-      )
-
-      result.add(output)
-
-    # sync all
-
-    Weave.sync_root()
+        spawn evaluate_nn_single_with_trace_thread_fn(
+          nn.cached_exec_trace.get.addr,
+          buffer_input,
+          buffer_output
+        )
 
 proc generate_hyper_weights(
   top_id: int,
