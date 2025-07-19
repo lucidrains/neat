@@ -227,9 +227,9 @@ proc get_parent_edge(meta_edge: MetaEdge): Edge =
 proc add_node(topology_id: int, node_type: NodeType = hidden): int
 proc add_edge(topology_id: int, from_node_id: int, to_node_id: int): int
 
-proc activate(act: Activation, input: Tensor[float]): Tensor[float]
-proc activate(act: Activation, input: float): float
-proc activate(node: MetaNode, input: Tensor[float]): Tensor[float]
+proc activate(act: Activation, input: Tensor[float]): Tensor[float] {.gcsafe.}
+proc activate(act: Activation, input: float): float {.gcsafe.}
+proc activate(node: MetaNode, input: Tensor[float]): Tensor[float] {.gcsafe.}
 proc rand_activation(): Activation
 
 proc add_topology(
@@ -720,7 +720,7 @@ proc evaluate_nn_exec_trace(
 proc evaluate_nn_with_trace(
   trace_with_meta_info: ExecTrace,
   inputs: seq[seq[float]]
-): seq[seq[float]] {.exportpy.} =
+): seq[seq[float]] {.gcsafe exportpy.} =
 
   var (meta_info, trace) = trace_with_meta_info
   let (num_inputs, num_outputs, num_nodes) = meta_info
@@ -774,6 +774,27 @@ proc evaluate_nn_single(
 
   return outputs.map(tensor => tensor[0])
 
+proc evaluate_nn_single_with_trace_thread_fn(
+  trace: ptr ExecTrace,
+  buffer_input: ptr UncheckedArray[float],
+  buffer_output: ptr UncheckedArray[float]
+) {.gcsafe.} =
+
+  let num_inputs = trace.node_info.num_inputs
+  var inputs = new_seq[float](num_inputs)
+
+  for i in 0 ..< num_inputs:
+    inputs[i] = buffer_input[i]
+
+  let seq_inputs = inputs.map(input => @[input])
+
+  let seq_output = evaluate_nn_with_trace(trace[], seq_inputs)
+
+  let outputs = seq_output.map(output => output[0])
+
+  for i in 0 ..< outputs.len:
+    buffer_output[i] = outputs[i]
+
 proc evaluate_population(
   top_id: int,
   inputs: seq[seq[float]]
@@ -783,12 +804,40 @@ proc evaluate_population(
 
   assert inputs.len == top.pop_size
 
-  for nn_id, input in inputs:
-    let nn = top.population[nn_id]
-    assert nn.num_inputs == input.len
+  # using weave for multi-threading
 
-    let seq_outputs = evaluate_nn_single(top_id, nn_id, input)
-    result.add(seq_outputs)
+  with_weave():
+
+    for nn_id, input in inputs:
+
+      let nn = top.population[nn_id]
+      assert nn.num_inputs == input.len
+
+      # set the cached graph execution on neural network if not exists (it has been mutated)
+
+      if nn.cached_exec_trace.is_none:
+        nn.cached_exec_trace = evaluate_nn_exec_trace(top_id, nn_id).some
+
+      let output = new_seq[float](top.num_outputs)
+
+      # input and output buffers for thread
+
+      let buffer_input = cast[ptr UncheckedArray[float]](input[0].unsafe_addr)
+      let buffer_output = cast[ptr UncheckedArray[float]](output[0].addr)
+
+      # spawn thread
+
+      spawn evaluate_nn_single_with_trace_thread_fn(
+        nn.cached_exec_trace.get.addr,
+        buffer_input,
+        buffer_output
+      )
+
+      result.add(output)
+
+    # sync all
+
+    Weave.sync_root()
 
 proc generate_hyper_weights(
   top_id: int,
@@ -822,21 +871,21 @@ proc generate_hyper_weights(
 proc activate(
   node: MetaNode,
   input: Tensor[float]
-): Tensor[float] =
+): Tensor[float] {.gcsafe.} =
 
   return activate(node.activation, input)
 
 proc activate(
   act: Activation,
   input: Tensor[float]
-): Tensor[float] =
+): Tensor[float]  {.gcsafe.} =
 
   return input.map(value => activate(act, value))
 
 proc activate(
   act: Activation,
   input: float
-): float =
+): float {.gcsafe.} =
 
   if act == identity:
     return input
