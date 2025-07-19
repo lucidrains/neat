@@ -296,7 +296,6 @@ class NEAT(GeneticAlgorithm):
         self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size)
         self.all_top_ids = [self.top.id]
 
-    
     def single_forward(
         self,
         index: int,
