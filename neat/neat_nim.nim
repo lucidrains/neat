@@ -21,7 +21,7 @@ import bitvector
 
 import arraymancer
 
-import malebolgia
+import weave
 
 type
   Prob = range[0.0..1.0]
@@ -31,6 +31,11 @@ type
 randomize()
 
 # templates
+
+template with_weave(code: untyped) =
+  Weave.init()
+  code
+  Weave.exit()
 
 template benchmark(
   name: string,
@@ -799,11 +804,9 @@ proc evaluate_population(
 
   assert inputs.len == top.pop_size
 
-  var master = create_master()
+  # using weave for multi-threading
 
-  # using malebolgia for multi-threading
-
-  master.await_all:
+  with_weave():
 
     for nn_id, input in inputs:
 
@@ -824,13 +827,17 @@ proc evaluate_population(
 
       # spawn thread
 
-      master.spawn evaluate_nn_single_with_trace_thread_fn(
+      spawn evaluate_nn_single_with_trace_thread_fn(
         nn.cached_exec_trace.get.addr,
         buffer_input,
         buffer_output
       )
 
       result.add(output)
+
+    # sync all
+
+    Weave.sync_root()
 
 proc generate_hyper_weights(
   top_id: int,
