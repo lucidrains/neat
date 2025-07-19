@@ -619,13 +619,11 @@ proc evaluate_nn(
 # caching graph execution trace
 
 proc evaluate_nn_exec_trace(
-  top_id: int,
+  top: Topology,
   nn_id: int,
 ): ExecTrace {.exportpy.} =
-
   var trace = new_seq[NodeUpdate]()
 
-  let top = topologies[top_id]
   let nn = top.population[nn_id]
 
   let num_nodes = nn.meta_nodes.len
@@ -744,6 +742,14 @@ proc evaluate_nn_exec_trace(
 
   return ((top.num_inputs, top.num_outputs, num_nodes), trace)
 
+proc evaluate_nn_exec_trace(
+  top_id: int,
+  nn_id: int,
+): ExecTrace {.exportpy.} =
+
+  let top = topologies[top_id]
+  return evaluate_nn_exec_trace(top, nn_id)  
+
 proc evaluate_nn_with_trace(
   trace_with_meta_info: ExecTrace,
   inputs: seq[seq[float]]
@@ -799,12 +805,12 @@ proc evaluate_nn_single(
   return outputs.map(tensor => tensor[0])
 
 proc evaluate_nn_single_with_trace_thread_fn(
-  trace: ExecTrace,
+  trace: ptr ExecTrace,
   buffer_input: ptr UncheckedArray[float],
   buffer_output: ptr UncheckedArray[float]
 ) {.gcsafe.} =
 
-  let num_inputs = trace.node_info.num_inputs
+  let num_inputs = trace[].node_info.num_inputs
   var inputs = new_seq[float](num_inputs)
 
   for i in 0 ..< num_inputs:
@@ -812,12 +818,21 @@ proc evaluate_nn_single_with_trace_thread_fn(
 
   let seq_inputs = inputs.map(input => @[input])
 
-  let seq_output = evaluate_nn_with_trace(trace, seq_inputs)
+  let seq_output = evaluate_nn_with_trace(trace[], seq_inputs)
 
   let outputs = seq_output.map(output => output[0])
 
   for i in 0 ..< outputs.len:
     buffer_output[i] = outputs[i]
+
+proc evaluate_nn_exec_trace_thread_fn(
+  top: Topology,
+  nn_id: int
+) {.gcsafe.} =
+
+  let nn = top.population[nn_id]
+  let trace = evaluate_nn_exec_trace(top, nn_id)
+  nn.cached_exec_trace = trace.some
 
 proc evaluate_population(
   top_id: int,
@@ -828,37 +843,36 @@ proc evaluate_population(
 
   assert inputs.len == top.pop_size
 
-  for nn_id, input in inputs:
+  sync_scope():
+    for nn_id in 0..< inputs.len:
+      let nn = top.population[nn_id]
 
-    let nn = top.population[nn_id]
-    assert nn.num_inputs == input.len
+      # set the cached graph execution on neural network if not exists (it has been mutated)
 
-    # set the cached graph execution on neural network if not exists (it has been mutated)
-
-    if nn.cached_exec_trace.is_none:
-      nn.cached_exec_trace = evaluate_nn_exec_trace(top_id, nn_id).some
+      if nn.cached_exec_trace.is_none:
+        spawn evaluate_nn_exec_trace_thread_fn(top, nn_id)
 
   # using weave for multi-threading
 
   let output = new_seq_with(top.population.len, new_seq[float](top.num_outputs))
 
-  parallel_for nn_id in 0 ..< inputs.len:
-    captures: {top, inputs, output}
+  sync_scope():
+    for nn_id in 0 ..< inputs.len:
 
-    let nn = top.population[nn_id]
+      let nn = top.population[nn_id]
 
-    # input and output buffers for thread
+      # input and output buffers for thread
 
-    let buffer_input = cast[ptr UncheckedArray[float]](inputs[nn_id][0].addr)
-    let buffer_output = cast[ptr UncheckedArray[float]](output[nn_id][0].addr)
+      let buffer_input = cast[ptr UncheckedArray[float]](inputs[nn_id][0].addr)
+      let buffer_output = cast[ptr UncheckedArray[float]](output[nn_id][0].addr)
 
-    # spawn thread
+      # spawn thread
 
-    spawn evaluate_nn_single_with_trace_thread_fn(
-      nn.cached_exec_trace.get,
-      buffer_input,
-      buffer_output
-    )
+      spawn evaluate_nn_single_with_trace_thread_fn(
+        nn.cached_exec_trace.get.addr,
+        buffer_input,
+        buffer_output
+      )
 
   return output
 
@@ -1017,19 +1031,19 @@ proc select_and_tournament(
 proc mutate(
   top_id: int,
   nn_id: int,
-  mutate_prob: Prob = 0.8,
+  mutate_prob: Prob = 1.0,
   add_remove_edge_prob: Prob = 0.01,
   add_remove_node_prob: Prob = 0.01,
   change_activation_prob: Prob = 0.01,
-  change_edge_weight_prob: Prob = 0.01,
+  change_edge_weight_prob: Prob = 0.15,
   replace_edge_weight_prob: Prob = 0.25,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
-  change_node_bias_prob: Prob = 0.051,
+  change_node_bias_prob: Prob = 0.08,
   decay_edge_weight_prob: Prob = 0.0,
   decay_node_bias_prob: Prob = 0.0,
-  grow_edge_prob: Prob = 0.001,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_edge_prob: Prob = 0.05,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
-  perturb_weight_strength: Prob = 0.25,
-  perturb_bias_strength: Prob = 0.25,
+  perturb_weight_strength: Prob = 0.05,
+  perturb_bias_strength: Prob = 0.05,
   decay_factor: float = 0.95
 ) {.exportpy.} =
 
