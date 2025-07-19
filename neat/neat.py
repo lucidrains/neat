@@ -1,5 +1,6 @@
 from __future__ import annotations
 from random import randrange
+from contextlib import contextmanager
 
 import jax
 from jax import (
@@ -64,6 +65,18 @@ def gumbel_sample(t, temperature = 1.):
         t = t + gumbel_noise(t)
 
     return t.argmax(axis = -1).tolist()
+
+# locking
+
+@contextmanager
+def with_lock(top_ids):
+    for top_id in top_ids:
+        init_top_lock(top_id)
+
+    yield
+
+    for top_id in top_ids:
+        deinit_top_lock(top_id)
 
 # topology
 
@@ -187,17 +200,14 @@ class GeneticAlgorithm:
         # 3. compute children with crossover
         # 4. concat children to population
 
-        Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(crossover_one_couple_and_add_to_population)(top_id, couple) for top_id in self.all_top_ids for couple in couples)
+        with with_lock(self.all_top_ids):
+            Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(crossover_one_couple_and_add_to_population)(top_id, couple) for top_id in self.all_top_ids for couple in couples)
 
         # 5. mutation
 
-        for top_id in self.all_top_ids:
-            init_top_lock(top_id)
+        with with_lock(self.all_top_ids):
+            Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(mutate)(top_id, nn_id) for top_id, nn_id in product(self.all_top_ids, range(num_preserve_elites, self.pop_size)))
 
-        Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(mutate)(top_id, nn_id) for top_id, nn_id in product(self.all_top_ids, range(num_preserve_elites, self.pop_size)))
-
-        for top_id in self.all_top_ids:
-            deinit_top_lock(top_id)
 
 class HyperNEAT(GeneticAlgorithm):
     def __init__(
