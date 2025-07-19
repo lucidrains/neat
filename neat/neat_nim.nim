@@ -25,6 +25,8 @@ import jsony
 
 import weave
 
+Weave.init()
+
 type
   Prob = range[0.0..1.0]
 
@@ -33,11 +35,6 @@ type
 randomize()
 
 # templates
-
-template with_weave(code: untyped) =
-  Weave.init()
-  code
-  Weave.exit()
 
 template benchmark(
   name: string,
@@ -802,7 +799,7 @@ proc evaluate_nn_single(
   return outputs.map(tensor => tensor[0])
 
 proc evaluate_nn_single_with_trace_thread_fn(
-  trace: ptr ExecTrace,
+  trace: ExecTrace,
   buffer_input: ptr UncheckedArray[float],
   buffer_output: ptr UncheckedArray[float]
 ) {.gcsafe.} =
@@ -815,7 +812,7 @@ proc evaluate_nn_single_with_trace_thread_fn(
 
   let seq_inputs = inputs.map(input => @[input])
 
-  let seq_output = evaluate_nn_with_trace(trace[], seq_inputs)
+  let seq_output = evaluate_nn_with_trace(trace, seq_inputs)
 
   let outputs = seq_output.map(output => output[0])
 
@@ -845,25 +842,23 @@ proc evaluate_population(
 
   let output = new_seq_with(top.population.len, new_seq[float](top.num_outputs))
 
-  with_weave():
+  parallel_for nn_id in 0 ..< inputs.len:
+    captures: {top, inputs, output}
 
-    parallel_for nn_id in 0 ..< inputs.len:
-      captures: {top, inputs, output}
+    let nn = top.population[nn_id]
 
-      let nn = top.population[nn_id]
+    # input and output buffers for thread
 
-      # input and output buffers for thread
+    let buffer_input = cast[ptr UncheckedArray[float]](inputs[nn_id][0].addr)
+    let buffer_output = cast[ptr UncheckedArray[float]](output[nn_id][0].addr)
 
-      let buffer_input = cast[ptr UncheckedArray[float]](inputs[nn_id][0].addr)
-      let buffer_output = cast[ptr UncheckedArray[float]](output[nn_id][0].addr)
+    # spawn thread
 
-      # spawn thread
-
-      spawn evaluate_nn_single_with_trace_thread_fn(
-        nn.cached_exec_trace.get.addr,
-        buffer_input,
-        buffer_output
-      )
+    spawn evaluate_nn_single_with_trace_thread_fn(
+      nn.cached_exec_trace.get,
+      buffer_input,
+      buffer_output
+    )
 
   return output
 
@@ -1458,6 +1453,9 @@ when is_main_module:
 
   let neat_top_id = add_topology(3, 4, @[16, 16])
   init_nn(neat_top_id)
-  init_population(neat_top_id, 2)
-  discard evaluate_population(neat_top_id, @[@[2.0, 3.0, 5.0], @[3.0, 5.0, 7.0]])
+  init_population(neat_top_id, 3)
+
+  benchmark("population", 10):
+    discard evaluate_population(neat_top_id, @[@[2.0, 3.0, 5.0], @[3.0, 5.0, 7.0], @[3.0, 5.0, 7.0]])
+
   remove_topology(neat_top_id)

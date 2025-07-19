@@ -297,6 +297,7 @@ class NEAT(GeneticAlgorithm):
         self,
         *dims,
         pop_size,
+        use_joblib_parallel = False
     ):
         self.dims = dims
         assert len(dims) >= 2
@@ -307,6 +308,8 @@ class NEAT(GeneticAlgorithm):
 
         self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size)
         self.all_top_ids = [self.top.id]
+
+        self.use_joblib_parallel = use_joblib_parallel
 
     def single_forward(
         self,
@@ -330,8 +333,9 @@ class NEAT(GeneticAlgorithm):
         sample = False,
         temperature = 1.,
         n_jobs = -1,
-        use_joblib_parallel = True
+        use_joblib_parallel = None
     ):
+        use_joblib_parallel = default(use_joblib_parallel, self.use_joblib_parallel)
 
         if use_joblib_parallel:
             logits = Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(evaluate_nn_single)(self.top.id, nn_id, one_state.tolist(), use_exec_cache = True) for nn_id, one_state in zip(range(self.pop_size), state))
