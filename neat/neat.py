@@ -28,6 +28,7 @@ from neat.neat_nim import (
     deinit_top_lock,
     generate_hyper_weights as generate_hyper_weights_nim,
     crossover_and_add_to_population,
+    crossover_one_couple_and_add_to_population,
     select_and_tournament,
     add_node,
     add_edge,
@@ -180,13 +181,13 @@ class GeneticAlgorithm:
         (
             sel_indices,
             fitnesses,
-            parent_indices_and_fitnesses
+            couples
         )= select_and_tournament(self.all_top_ids, fitnesses.tolist(), num_selected, tournament_size)
 
         # 3. compute children with crossover
         # 4. concat children to population
 
-        Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(crossover_and_add_to_population)(top_id, parent_indices_and_fitnesses) for top_id in self.all_top_ids)
+        Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(crossover_one_couple_and_add_to_population)(top_id, couple) for top_id in self.all_top_ids for couple in couples)
 
         # 5. mutation
 

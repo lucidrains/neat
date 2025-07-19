@@ -203,6 +203,18 @@ type
     pop_size: int = 0
     population: seq[NeuralNetwork] = @[]
 
+  # crossover related
+
+  ParentAndFitness = tuple
+    index: int
+    fitness: float
+
+  Couple = tuple
+    parent1: ParentAndFitness
+    parent2: ParentAndFitness
+
+  Couples = seq[Couple]
+
 # globals
 
 var topologies = init_table[int, Topology]()
@@ -232,6 +244,7 @@ proc add_edge(topology_id: int, from_node_id: int, to_node_id: int): int
 proc activate(act: Activation, input: Tensor[float]): Tensor[float] {.gcsafe.}
 proc activate(act: Activation, input: float): float {.gcsafe.}
 proc activate(node: MetaNode, input: Tensor[float]): Tensor[float] {.gcsafe.}
+
 proc rand_activation(): Activation
 
 proc add_topology(
@@ -732,10 +745,7 @@ proc evaluate_nn_with_trace(
   let one_input = seq_inputs_tensor[0]
   let one_input_shape = one_input.shape
 
-  var values = new_seq[Tensor[float]](num_nodes)
-
-  for i in 0 ..< values.len:
-    values[i] = zeros[float](one_input_shape)
+  var values = new_seq_with(num_nodes, zeros[float](one_input_shape))
 
   values &= seq_inputs_tensor
 
@@ -920,7 +930,7 @@ proc tournament(
   fitnesses: seq[float],
   num_tournaments: range[1..int.high],
   tournament_size: range[2..int.high]
-): seq[((int, float), (int, float))] {.exportpy.} =
+): Couples {.exportpy.} =
 
   var gene_ids = arange(fitnesses.len).to_seq()
 
@@ -1365,16 +1375,34 @@ proc crossover(
 
   return nn
 
-proc crossover_and_add_to_population(
+proc crossover_one_couple_and_add_to_population(
   top_id: int,
-  parent_indices_and_fitnesses: seq[((int, float), (int, float))],
+  couple: Couple,
   fitness_diff_is_same: float = 0.0
 ) {.exportpy.} =
 
   let top = topologies[top_id]
 
-  for one_pair in parent_indices_and_fitnesses:
-    let (parent1_info, parent2_info) = one_pair
+  let (parent1_info, parent2_info) = couple
+
+  let (parent1, fitness1) = parent1_info
+  let (parent2, fitness2) = parent2_info
+
+  let child = crossover(top_id, parent1, parent2, fitness1, fitness2, fitness_diff_is_same)
+
+  with_lock(top.lock):
+    top.population.add(child)
+
+proc crossover_and_add_to_population(
+  top_id: int,
+  couples: Couples,
+  fitness_diff_is_same: float = 0.0
+) {.exportpy.} =
+
+  let top = topologies[top_id]
+
+  for couple in couples:
+    let (parent1_info, parent2_info) = couple
 
     let (parent1, fitness1) = parent1_info
     let (parent2, fitness2) = parent2_info
