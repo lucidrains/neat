@@ -36,7 +36,8 @@ from neat.neat_nim import (
     mutate,
     evaluate_nn,
     evaluate_nn_single,
-    evaluate_population
+    evaluate_population,
+    get_topology_info
 )
 
 from joblib import Parallel, delayed

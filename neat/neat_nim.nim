@@ -215,6 +215,11 @@ type
 
   Couples = seq[Couple]
 
+  TopologyInfo = object
+    population_size: int
+    total_innovated_nodes: int
+    total_innovated_edges: int
+
 # globals
 
 var topologies = init_table[int, Topology]()
@@ -235,6 +240,16 @@ proc get_parent_edge(meta_edge: MetaEdge): Edge =
   for edge in top.edges:
     if edge.id == meta_edge.edge_id:
       result = edge
+
+proc get_topology_info(
+  top_id: int
+): TopologyInfo {.exportpy.} =
+
+  let top = topologies[top_id]
+
+  result.population_size = top.population.len
+  result.total_innovated_nodes = top.node_innovation_id + 1
+  result.total_innovated_edges = top.edge_innovation_id + 1
 
 # functions
 
