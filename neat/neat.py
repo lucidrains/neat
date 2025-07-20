@@ -30,13 +30,10 @@ from neat.neat_nim import (
     generate_hyper_weights as generate_hyper_weights_nim,
     generate_all_hyper_weights,
     crossover_and_add_to_population,
-    crossover_one_couple_and_add_to_population,
     select_and_tournament,
     add_node,
     add_edge,
-    mutate,
     mutate_all,
-    evaluate_nn,
     evaluate_nn_single,
     evaluate_population,
     get_topology_info

@@ -258,6 +258,8 @@ proc activate(act: Activation, input: Tensor[float32]): Tensor[float32] {.gcsafe
 proc activate(act: Activation, input: float32): float32 {.gcsafe.}
 proc activate(node: MetaNode, input: Tensor[float32]): Tensor[float32] {.gcsafe.}
 
+proc set_population_exec_trace(top_id: int)
+
 proc rand_activation(): Activation
 
 proc add_topology(
@@ -485,6 +487,8 @@ proc init_population(
     init_nn(top_id)
 
   assert top.population.len == top.pop_size
+
+  set_population_exec_trace(top_id)
 
 # forward
 
@@ -827,6 +831,19 @@ proc evaluate_nn_exec_trace_thread_fn(
   let trace = evaluate_nn_exec_trace(top, nn_id)
   nn.cached_exec_trace = trace.some
 
+proc set_population_exec_trace(
+  top_id: int
+) =
+  let top = topologies[top_id]
+
+  for nn_id in 0 ..< top.population.len:
+    let nn = top.population[nn_id]
+
+    # set the cached graph execution on neural network if not exists (it has been mutated)
+
+    if nn.cached_exec_trace.is_none:
+      nn.cached_exec_trace = evaluate_nn_exec_trace(top.id, nn_id).some
+
 proc evaluate_population(
   top_id: int,
   inputs: seq[seq[float32]]
@@ -835,16 +852,6 @@ proc evaluate_population(
   let top = topologies[top_id]
 
   assert inputs.len == top.pop_size
-
-  for nn_id in 0..< inputs.len:
-    let nn = top.population[nn_id]
-
-    # set the cached graph execution on neural network if not exists (it has been mutated)
-
-    if nn.cached_exec_trace.is_none:
-      spawn evaluate_nn_exec_trace_thread_fn(top, nn_id)
-
-  Weave.sync_root()
 
   # using weave for multi-threading
 
@@ -1044,10 +1051,10 @@ proc mutate(
   change_node_bias_prob: Prob = 0.005,
   decay_edge_weight_prob: Prob = 0.0,
   decay_node_bias_prob: Prob = 0.0,
-  grow_edge_prob: Prob = 0.0001,           # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_edge_prob: Prob = 0.0,              # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
-  perturb_weight_strength: Prob = 0.05,
-  perturb_bias_strength: Prob = 0.05,
+  perturb_weight_strength: Prob = 0.1,
+  perturb_bias_strength: Prob = 0.1,
   decay_factor: float32 = 0.95
 ) {.gcsafe exportpy.} =
 
@@ -1250,6 +1257,8 @@ proc mutate_all(
 
     for nn_id in 0 ..< top.population.len:
       mutate(top, nn_id)
+
+    set_population_exec_trace(top_id)
 
 proc crossover(
   top: Topology,
@@ -1500,5 +1509,6 @@ when is_main_module:
 
   let neat_top_id = add_topology(3, 4, @[16, 16])
   init_population(neat_top_id, 3)
+
   discard evaluate_population(neat_top_id, @[@[2.0'f32, 3.0, 5.0], @[3.0'f32, 5.0, 7.0], @[3.0'f32, 5.0, 7.0]])
   remove_topology(neat_top_id)
