@@ -199,6 +199,7 @@ type
     edge_innovation_id: Atomic[int]
 
     pop_size: int = 0
+    curr_pop_size: int = 0
     population: seq[NeuralNetwork] = @[]
 
   # crossover related
@@ -373,6 +374,7 @@ proc add_edge(
 
 proc init_nn(
   top_id: int,
+  nn_id: int,
   sparsity: float32 = 0.05
 ) =
   let top = topologies[top_id]
@@ -471,7 +473,7 @@ proc init_nn(
 
   # add neural net to population
 
-  top.population.add(nn)
+  top.population[nn_id] = nn
 
 proc init_population(
   top_id: int,
@@ -482,9 +484,11 @@ proc init_population(
   assert top.pop_size == 0
 
   top.pop_size = pop_size
+  top.curr_pop_size = pop_size
+  top.population = new_seq[NeuralNetwork](pop_size)
 
-  for _ in 0..<pop_size:
-    init_nn(top_id)
+  for nn_id in 0 ..< pop_size:
+    init_nn(top_id, nn_id)
 
   assert top.population.len == top.pop_size
 
@@ -1035,7 +1039,13 @@ proc select_and_tournament(
 
   for top_id in top_ids:
     let top = topologies[top_id]
-    top.population = selected_sorted_indices.map(index => top.population[index])
+
+    let selected = selected_sorted_indices.map(index => top.population[index])
+
+    for i in 0 ..< num_selected:
+      top.population[i] = selected[i]
+
+    top.curr_pop_size = num_selected
 
   return (selected_sorted_indices, selected_sorted_fitnesses, parent_indices)
 
@@ -1051,7 +1061,7 @@ proc mutate(
   change_node_bias_prob: Prob = 0.005,
   decay_edge_weight_prob: Prob = 0.0,
   decay_node_bias_prob: Prob = 0.0,
-  grow_edge_prob: Prob = 0.0,              # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_edge_prob: Prob = 1e-5,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1,
@@ -1266,7 +1276,7 @@ proc crossover(
   second_parent_nn_id: int,
   first_parent_fitness: float32,
   second_parent_fitness: float32,
-  fitness_diff_is_same: float32 = 0.0
+  prob_child_disabled_given_parent_cond: float32 = 0.75
 ): NeuralNetwork {.exportpy.} =
 
   # parents
@@ -1330,17 +1340,13 @@ proc crossover(
     disjoint_node_ids: seq[int] = @[]
     disjoint_edge_ids: seq[int] = @[]
 
-  if fitness_difference <= fitness_diff_is_same:
-    joint_node_ids &= (parent1_node_set * parent2_node_set).to_seq
-    joint_edge_ids &= (parent1_edge_set * parent2_edge_set).to_seq
-
-  elif first_parent_fitness < second_parent_fitness:
+  if first_parent_fitness <= second_parent_fitness:
     disjoint_nodes_index = parent2_nodes_index
     disjoint_edges_index = parent2_edges_index
     disjoint_node_ids = (parent2_node_set - parent1_node_set).to_seq
     disjoint_edge_ids = (parent2_edge_set - parent1_edge_set).to_seq
 
-  elif second_parent_fitness > first_parent_fitness:
+  else:
     disjoint_nodes_index = parent1_nodes_index
     disjoint_edges_index = parent1_edges_index
     disjoint_node_ids = (parent1_node_set - parent2_node_set).to_seq
@@ -1354,13 +1360,20 @@ proc crossover(
 
   for node_id in joint_node_ids:
 
+    let
+      parent1_node = parent1_nodes_index[node_id]
+      parent2_node = parent2_nodes_index[node_id]
+
     let rand_node = if coin_flip():
-      parent1_nodes_index[node_id]
+      parent1_node
     else:
-      parent2_nodes_index[node_id]
+      parent2_node
 
     let new_node = MetaNode()
     new_node[] = rand_node[]
+
+    if (parent1_node.disabled or parent2_node.disabled):
+      new_node.disabled = satisfy_prob(prob_child_disabled_given_parent_cond)
 
     child_node_index[new_node.node_id] = child_nodes.len
     child_nodes.add(new_node)
@@ -1380,13 +1393,20 @@ proc crossover(
 
   for edge_id in joint_edge_ids:
 
+    let
+      parent1_edge = parent1_edges_index[edge_id]
+      parent2_edge = parent2_edges_index[edge_id]
+
     let rand_edge = if coin_flip():
-      parent1_edges_index[edge_id]
+      parent1_edge
     else:
-      parent2_edges_index[edge_id]
+      parent2_edge
 
     let new_edge = MetaEdge()
     new_edge[] = rand_edge[]
+
+    if (parent1_edge.disabled or parent2_edge.disabled):
+      new_edge.disabled = satisfy_prob(prob_child_disabled_given_parent_cond)
 
     let edge = find_edge(top, new_edge.edge_id)
 
@@ -1436,8 +1456,8 @@ proc crossover(
 
 proc crossover_one_couple_and_add_to_population(
   top: Topology,
+  nn_id: int,
   couple: Couple,
-  fitness_diff_is_same: float32 = 0.0
 ) {.exportpy.} =
 
   let (parent1_info, parent2_info) = couple
@@ -1445,29 +1465,31 @@ proc crossover_one_couple_and_add_to_population(
   let (parent1, fitness1) = parent1_info
   let (parent2, fitness2) = parent2_info
 
-  let child = crossover(top, parent1, parent2, fitness1, fitness2, fitness_diff_is_same)
+  let child = crossover(top, parent1, parent2, fitness1, fitness2)
 
-  top.population.add(child)
+  top.population[nn_id] = child
 
 proc crossover_one_couple_and_add_to_population(
   top_id: int,
+  nn_id: int,
   couple: Couple,
-  fitness_diff_is_same: float32 = 0.0
 ) {.exportpy.} =
   let top = topologies[top_id]
-  crossover_one_couple_and_add_to_population(top, couple, fitness_diff_is_same)
+  crossover_one_couple_and_add_to_population(top, nn_id, couple)
 
 proc crossover_and_add_to_population(
   top_ids: seq[int],
   couples: seq[((int, float32), (int, float32))],
-  fitness_diff_is_same: float32 = 0.0
 ) {.exportpy.} =
 
   for top_id in top_ids:
     let top = topologies[top_id]
 
-    for couple in couples:
-      crossover_one_couple_and_add_to_population(top, couple, fitness_diff_is_same)
+    for item in zip(couples, (top.curr_pop_size ..< top.pop_size).to_seq):
+      let (couple, nn_id) = item
+      crossover_one_couple_and_add_to_population(top, nn_id, couple)
+
+    top.curr_pop_size = top.pop_size
 
 # quick test
 
