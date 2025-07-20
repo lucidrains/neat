@@ -14,6 +14,7 @@ import std/[
   sugar,
   segfaults,
   locks,
+  atomics,
   algorithm
 ]
 
@@ -194,8 +195,8 @@ type
     num_hiddens: seq[int] = @[]
 
     nn_id: int = 0
-    node_innovation_id: int = 0
-    edge_innovation_id: int = 0
+    node_innovation_id: Atomic[int]
+    edge_innovation_id: Atomic[int]
 
     pop_size: int = 0
     population: seq[NeuralNetwork] = @[]
@@ -220,7 +221,8 @@ type
 # globals
 
 var topologies = init_table[int, Topology]()
-var topology_id = 0
+var topology_id: Atomic[int]
+
 
 # helper accessors
 
@@ -244,8 +246,8 @@ proc get_topology_info(
   let top = topologies[top_id]
 
   result.population_size = top.population.len
-  result.total_innovated_nodes = top.node_innovation_id + 1
-  result.total_innovated_edges = top.edge_innovation_id + 1
+  result.total_innovated_nodes = top.node_innovation_id.load + 1
+  result.total_innovated_edges = top.edge_innovation_id.load + 1
 
 # functions
 
@@ -265,15 +267,13 @@ proc add_topology(
 ): int {.exportpy.} =
 
   let topology = Topology(
-    id: topology_id,
+    id: topology_id.fetch_add(1),
     num_inputs: num_inputs,
     num_outputs: num_outputs,
     num_hiddens: num_hiddens
   )
 
-  topologies[topology_id] = topology
-
-  topology_id += 1
+  topologies[topology.id] = topology
 
   # create input and output nodes
 
@@ -337,10 +337,8 @@ proc add_node(
 
   # create node, increment primary key, and add to global nodes
 
-  let node = Node(id: top.node_innovation_id, topology_id: top.id)
+  let node = Node(id: top.node_innovation_id.fetch_add(1), topology_id: top.id)
   top.nodes.add(node)
-
-  top.node_innovation_id += 1
   return node.id
 
 proc add_edge(
@@ -358,15 +356,13 @@ proc add_edge(
   # create edge, increment primary key and add to global edges
 
   let edge = Edge(
-    id: top.edge_innovation_id,
+    id: top.edge_innovation_id.fetch_add(1),
     topology_id: top.id,
     from_node_id: from_node_id,
     to_node_id: to_node_id
   )
 
   top.edges.add(edge)
-
-  top.edge_innovation_id += 1
   return edge.id
 
 # main evolutionary functions
@@ -487,6 +483,8 @@ proc init_population(
 
   for _ in 0..<pop_size:
     init_nn(top_id)
+
+  assert top.population.len == top.pop_size
 
 # forward
 
@@ -902,6 +900,15 @@ proc generate_hyper_weights(
 
   return weights.reshape(meta_data).to_seq
 
+proc generate_all_hyper_weights(
+  top_id: int,
+  shape: seq[int]
+): seq[seq[float32]] {.exportpy.} =
+  let top = topologies[top_id]
+
+  for nn_id in 0 ..< top.population.len:
+    result.add(generate_hyper_weights(top_id, nn_id, shape))
+
 proc activate(
   node: MetaNode,
   input: Tensor[float32]
@@ -1029,15 +1036,15 @@ proc mutate(
   top: Topology,
   nn_id: int,
   mutate_prob: Prob = 1.0,
-  add_remove_edge_prob: Prob = 0.0001,
-  add_remove_node_prob: Prob = 0.0001,
+  add_remove_edge_prob: Prob = 0.005,
+  add_remove_node_prob: Prob = 0.005,
   change_activation_prob: Prob = 0.05,
   change_edge_weight_prob: Prob = 0.05,
   replace_edge_weight_prob: Prob = 0.005,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
-  change_node_bias_prob: Prob = 0.001,
+  change_node_bias_prob: Prob = 0.005,
   decay_edge_weight_prob: Prob = 0.0,
   decay_node_bias_prob: Prob = 0.0,
-  grow_edge_prob: Prob = 0.00005,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_edge_prob: Prob = 0.0001,           # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
   perturb_weight_strength: Prob = 0.05,
   perturb_bias_strength: Prob = 0.05,
@@ -1134,10 +1141,6 @@ proc mutate(
 
       meta_edge.disabled = true
 
-      # acquire lock
-
-      top.lock.acquire()
-
       # add a new innovated node
 
       let node_id = add_node(top)
@@ -1146,12 +1149,8 @@ proc mutate(
 
       let edge = find_edge(top, meta_edge.edge_id)
 
-      discard add_edge(top, edge.from_node_id, node_id)
-      discard add_edge(top, node_id, edge.to_node_id)
-
-      # release
-
-      top.lock.release()
+      let edge_id1 = add_edge(top, edge.from_node_id, node_id)
+      let edge_id2 = add_edge(top, node_id, edge.to_node_id)
 
       # now add the meta nodes and edges for this particular neural network instantiation
 
@@ -1166,6 +1165,7 @@ proc mutate(
 
       let meta_edge_incoming = MetaEdge(
         topology_id: top.id,
+        edge_id: edge_id1,
         local_from_node_id: meta_edge.local_from_node_id,
         local_to_node_id: new_local_node_id,
         weight: 1.0 # they initialize to 1.
@@ -1175,6 +1175,7 @@ proc mutate(
 
       let meta_edge_outgoing = MetaEdge(
         topology_id: top.id,
+        edge_id: edge_id2,
         local_from_node_id: new_local_node_id,
         local_to_node_id: meta_edge.local_to_node_id,
         weight: meta_edge.weight # inherits old weight
@@ -1248,20 +1249,16 @@ proc mutate_all(
     let top = topologies[top_id]
 
     for nn_id in 0 ..< top.population.len:
-      spawn mutate(top, nn_id)
-
-  Weave.sync_root()
+      mutate(top, nn_id)
 
 proc crossover(
-  top_id: int,
+  top: Topology,
   first_parent_nn_id: int,
   second_parent_nn_id: int,
   first_parent_fitness: float32,
   second_parent_fitness: float32,
   fitness_diff_is_same: float32 = 0.0
 ): NeuralNetwork {.exportpy.} =
-
-  let top = topologies[top_id]
 
   # parents
 
@@ -1298,7 +1295,7 @@ proc crossover(
   let parent1_nodes_index = index_meta_nodes_by_global_id(parent1.meta_nodes)
   let parent2_nodes_index = index_meta_nodes_by_global_id(parent2.meta_nodes)
 
-  let parent1_edges_index = index_meta_edges_by_global_id(parent2.meta_edges)
+  let parent1_edges_index = index_meta_edges_by_global_id(parent1.meta_edges)
   let parent2_edges_index = index_meta_edges_by_global_id(parent2.meta_edges)
 
   let parent1_node_set = parent1_nodes_index.keys.to_seq.to_hash_set
@@ -1429,40 +1426,39 @@ proc crossover(
   return nn
 
 proc crossover_one_couple_and_add_to_population(
-  top_id: int,
+  top: Topology,
   couple: Couple,
   fitness_diff_is_same: float32 = 0.0
 ) {.exportpy.} =
-
-  let top = topologies[top_id]
 
   let (parent1_info, parent2_info) = couple
 
   let (parent1, fitness1) = parent1_info
   let (parent2, fitness2) = parent2_info
 
-  let child = crossover(top_id, parent1, parent2, fitness1, fitness2, fitness_diff_is_same)
+  let child = crossover(top, parent1, parent2, fitness1, fitness2, fitness_diff_is_same)
 
-  with_lock(top.lock):
-    top.population.add(child)
+  top.population.add(child)
+
+proc crossover_one_couple_and_add_to_population(
+  top_id: int,
+  couple: Couple,
+  fitness_diff_is_same: float32 = 0.0
+) {.exportpy.} =
+  let top = topologies[top_id]
+  crossover_one_couple_and_add_to_population(top, couple, fitness_diff_is_same)
 
 proc crossover_and_add_to_population(
-  top_id: int,
-  couples: Couples,
+  top_ids: seq[int],
+  couples: seq[((int, float32), (int, float32))],
   fitness_diff_is_same: float32 = 0.0
 ) {.exportpy.} =
 
-  let top = topologies[top_id]
+  for top_id in top_ids:
+    let top = topologies[top_id]
 
-  for couple in couples:
-    let (parent1_info, parent2_info) = couple
-
-    let (parent1, fitness1) = parent1_info
-    let (parent2, fitness2) = parent2_info
-
-    let child = crossover(top_id, parent1, parent2, fitness1, fitness2, fitness_diff_is_same)
-
-    top.population.add(child)
+    for couple in couples:
+      crossover_one_couple_and_add_to_population(top, couple, fitness_diff_is_same)
 
 # quick test
 
@@ -1471,9 +1467,15 @@ when is_main_module:
   # hyperneat
 
   let hyperneat_top_id = add_topology(3, 1, @[16, 16, 16])
-  init_nn(hyperneat_top_id)
   init_population(hyperneat_top_id, 10)
-  mutate_all(@[hyperneat_top_id])
+  var top = topologies[hyperneat_top_id]
+
+  assert top.population.len == 10
+
+  for i in 0..<10:
+    let (_, _, couples) = select_and_tournament(@[hyperneat_top_id], @[1.0'f32, 2.0, 3.0, 5.0, 4.0, 2.0, 3.0, 1.0, 2.0, 3.0], num_selected = 4, tournament_size = 2)
+    crossover_and_add_to_population(@[hyperneat_top_id], couples)
+    mutate_all(@[hyperneat_top_id])
 
   let output1 = evaluate_nn_single(hyperneat_top_id, 0, @[2.0'f32, 3.0, 5.0])
   let trace = evaluate_nn_exec_trace(hyperneat_top_id, 0)
@@ -1487,7 +1489,8 @@ when is_main_module:
   benchmark("cached", 100):
     discard evaluate_nn_single(hyperneat_top_id, 0, @[2.0'f32, 3.0, 5.0], use_exec_cache = true)
 
-  discard crossover(hyperneat_top_id, 0, 1, 0.5, 0.3)
+  let hyperneat_top = topologies[hyperneat_top_id]
+  discard crossover(hyperneat_top, 0, 1, 0.5, 0.3)
 
   mutate(hyperneat_top_id, nn_id = 0, mutate_prob = 1.0, grow_edge_prob = 1.0)
   discard generate_hyper_weights(hyperneat_top_id, 0, @[2, 3, 5])
@@ -1496,10 +1499,6 @@ when is_main_module:
   # regular neat
 
   let neat_top_id = add_topology(3, 4, @[16, 16])
-  init_nn(neat_top_id)
   init_population(neat_top_id, 3)
-
-  benchmark("population", 10):
-    discard evaluate_population(neat_top_id, @[@[2.0'f32, 3.0, 5.0], @[3.0'f32, 5.0, 7.0], @[3.0'f32, 5.0, 7.0]])
-
+  discard evaluate_population(neat_top_id, @[@[2.0'f32, 3.0, 5.0], @[3.0'f32, 5.0, 7.0], @[3.0'f32, 5.0, 7.0]])
   remove_topology(neat_top_id)

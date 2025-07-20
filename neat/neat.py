@@ -28,6 +28,7 @@ from neat.neat_nim import (
     init_top_lock,
     deinit_top_lock,
     generate_hyper_weights as generate_hyper_weights_nim,
+    generate_all_hyper_weights,
     crossover_and_add_to_population,
     crossover_one_couple_and_add_to_population,
     select_and_tournament,
@@ -40,8 +41,6 @@ from neat.neat_nim import (
     evaluate_population,
     get_topology_info
 )
-
-from joblib import Parallel, delayed
 
 # functions
 
@@ -130,13 +129,14 @@ class Topology:
     def generate_hyper_weights(
         self,
         shape: tuple[int, ...] | None = None,
-        n_jobs = -1
     ) -> list[Array]:
 
         shape = default(shape, self.shape)
 
-        all_weights = Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(self.generate_hyper_weight)(nn_id, shape) for nn_id in range(self.pop_size))
-        return jnp.stack(all_weights)
+        all_weights = generate_all_hyper_weights(self.id, shape)
+        all_weights = jnp.array(all_weights).reshape(-1, *shape)
+
+        return all_weights
 
 # mlp for actor
 
@@ -170,10 +170,7 @@ class GeneticAlgorithm:
         num_selected_frac = None,
         tournament_frac = 0.25,
         num_preserve_elites_frac = 0.1,
-        n_jobs = -1,
-        use_joblib_parallel = None
     ):
-        use_joblib_parallel = default(use_joblib_parallel, getattr(self, 'use_joblib_parallel', True))
 
         assert exists(num_selected) ^ exists(num_selected_frac)
 
@@ -200,21 +197,16 @@ class GeneticAlgorithm:
             sel_indices,
             fitnesses,
             couples
-        )= select_and_tournament(self.all_top_ids, fitnesses.tolist(), num_selected, tournament_size)
+        ) = select_and_tournament(self.all_top_ids, fitnesses.tolist(), num_selected, tournament_size)
 
         # 3. compute children with crossover
         # 4. concat children to population
 
-        with with_lock(self.all_top_ids):
-            Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(crossover_one_couple_and_add_to_population)(top_id, couple) for top_id in self.all_top_ids for couple in couples)
+        crossover_and_add_to_population(self.all_top_ids, couples)
 
         # 5. mutation
 
-        if use_joblib_parallel:
-            with with_lock(self.all_top_ids):
-                Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(mutate)(top_id, nn_id) for top_id, nn_id in product(self.all_top_ids, range(num_preserve_elites, self.pop_size)))
-        else:
-            mutate_all(self.all_top_ids)
+        mutate_all(self.all_top_ids)
 
 class HyperNEAT(GeneticAlgorithm):
     def __init__(
@@ -222,8 +214,9 @@ class HyperNEAT(GeneticAlgorithm):
         *dims,
         pop_size,
         num_hiddens = 0,
-        weight_norm = True
+        weight_norm = True,
     ):
+
         self.dims = dims
         assert len(dims) > 1
 
@@ -303,7 +296,6 @@ class NEAT(GeneticAlgorithm):
         self,
         *dims,
         pop_size,
-        use_joblib_parallel = False
     ):
         self.dims = dims
         assert len(dims) >= 2
@@ -314,8 +306,6 @@ class NEAT(GeneticAlgorithm):
 
         self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size)
         self.all_top_ids = [self.top.id]
-
-        self.use_joblib_parallel = use_joblib_parallel
 
     def single_forward(
         self,
@@ -339,14 +329,8 @@ class NEAT(GeneticAlgorithm):
         sample = False,
         temperature = 1.,
         n_jobs = -1,
-        use_joblib_parallel = None
     ):
-        use_joblib_parallel = default(use_joblib_parallel, self.use_joblib_parallel)
-
-        if use_joblib_parallel:
-            logits = Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(evaluate_nn_single)(self.top.id, nn_id, one_state.tolist(), use_exec_cache = True) for nn_id, one_state in zip(range(self.pop_size), state))
-        else:
-            logits = evaluate_population(self.top.id, state.tolist())
+        logits = evaluate_population(self.top.id, state.tolist())
 
         logits = jnp.array(logits)
 
