@@ -231,11 +231,10 @@ proc get_parent_node(meta_node: MetaNode): Node =
     if node.id == meta_node.node_id:
       result = node
 
-proc get_parent_edge(meta_edge: MetaEdge): Edge =
-  let top = topologies[meta_edge.topology_id]
+proc find_edge(top: Topology, edge_id: int): Edge =
 
   for edge in top.edges:
-    if edge.id == meta_edge.edge_id:
+    if edge.id == edge_id:
       result = edge
 
 proc get_topology_info(
@@ -250,8 +249,8 @@ proc get_topology_info(
 
 # functions
 
-proc add_node(topology_id: int, node_type: NodeType = hidden): int
-proc add_edge(topology_id: int, from_node_id: int, to_node_id: int): int
+proc add_node(top: Topology, node_type: NodeType = hidden): int
+proc add_edge(top: Topology, from_node_id: int, to_node_id: int): int
 
 proc activate(act: Activation, input: Tensor[float32]): Tensor[float32] {.gcsafe.}
 proc activate(act: Activation, input: float32): float32 {.gcsafe.}
@@ -283,16 +282,16 @@ proc add_topology(
     output_node_ids = (num_inputs..<(num_inputs + num_outputs)).to_seq
 
   for _ in 0..<num_inputs:
-    discard add_node(topology.id, NodeType.input)
+    discard add_node(topology, NodeType.input)
 
   for _ in 0..<num_outputs:
-    discard add_node(topology.id, NodeType.output)
+    discard add_node(topology, NodeType.output)
 
   # create edges
 
   for input_id in input_node_ids:
     for output_id in output_node_ids:
-      discard add_edge(topology.id, input_id, output_id)
+      discard add_edge(topology, input_id, output_id)
 
   # initial pool of hidden nodes and edges, all disabled for new neural networks at start
 
@@ -302,7 +301,7 @@ proc add_topology(
     var layer_hidden_ids: seq[int] = @[]
 
     for _ in 0..<num_hidden_layer:
-      layer_hidden_ids.add(add_node(topology.id, NodeType.hidden))
+      layer_hidden_ids.add(add_node(topology, NodeType.hidden))
 
     hidden_node_ids.add(layer_hidden_ids)
 
@@ -314,7 +313,7 @@ proc add_topology(
 
     for from_id in from_layer_ids:
       for to_id in to_layer_ids:
-        discard add_edge(topology.id, from_id, to_id)
+        discard add_edge(topology, from_id, to_id)
 
   # return id
 
@@ -332,11 +331,9 @@ proc deinit_top_lock(topology_id: int) {.exportpy.} =
   top.lock.deinit_lock()
 
 proc add_node(
-  topology_id: int,
+  top: Topology,
   node_type: NodeType = hidden
 ): int {.exportpy.} =
-
-  let top = topologies[topology_id]
 
   # create node, increment primary key, and add to global nodes
 
@@ -347,12 +344,10 @@ proc add_node(
   return node.id
 
 proc add_edge(
-  topology_id: int,
+  top: Topology,
   from_node_id: int,
   to_node_id: int
 ): int {.exportpy.} =
-
-  let top = topologies[topology_id]
 
   # validate node id
 
@@ -1031,7 +1026,7 @@ proc select_and_tournament(
   return (selected_sorted_indices, selected_sorted_fitnesses, parent_indices)
 
 proc mutate(
-  top_id: int,
+  top: Topology,
   nn_id: int,
   mutate_prob: Prob = 1.0,
   add_remove_edge_prob: Prob = 0.0001,
@@ -1047,9 +1042,8 @@ proc mutate(
   perturb_weight_strength: Prob = 0.05,
   perturb_bias_strength: Prob = 0.05,
   decay_factor: float32 = 0.95
-) {.exportpy.} =
+) {.gcsafe exportpy.} =
 
-  let top = topologies[top_id]
   let nn = top.population[nn_id]
 
   if not satisfy_prob(mutate_prob):
@@ -1146,14 +1140,14 @@ proc mutate(
 
       # add a new innovated node
 
-      let node_id = add_node(top_id)
+      let node_id = add_node(top)
 
       # add the two innovated edges, with the new node above in between
 
-      let edge = meta_edge.get_parent_edge()
+      let edge = find_edge(top, meta_edge.edge_id)
 
-      discard add_edge(top_id, edge.from_node_id, node_id)
-      discard add_edge(top_id, node_id, edge.to_node_id)
+      discard add_edge(top, edge.from_node_id, node_id)
+      discard add_edge(top, node_id, edge.to_node_id)
 
       # release
 
@@ -1162,7 +1156,7 @@ proc mutate(
       # now add the meta nodes and edges for this particular neural network instantiation
 
       let meta_node = MetaNode(
-        topology_id: top_id,
+        topology_id: top.id,
         node_id: node_id,
         activation: rand_activation()
       )
@@ -1171,7 +1165,7 @@ proc mutate(
       nn.meta_nodes.add(meta_node)
 
       let meta_edge_incoming = MetaEdge(
-        topology_id: top_id,
+        topology_id: top.id,
         local_from_node_id: meta_edge.local_from_node_id,
         local_to_node_id: new_local_node_id,
         weight: 1.0 # they initialize to 1.
@@ -1180,7 +1174,7 @@ proc mutate(
       nn.meta_edges.add(meta_edge_incoming)
 
       let meta_edge_outgoing = MetaEdge(
-        topology_id: top_id,
+        topology_id: top.id,
         local_from_node_id: new_local_node_id,
         local_to_node_id: meta_edge.local_to_node_id,
         weight: meta_edge.weight # inherits old weight
@@ -1224,6 +1218,39 @@ proc mutate(
   # properly detect change in future
 
   nn.cached_exec_trace = none(ExecTrace)
+
+proc mutate(
+  top_id: int,
+  nn_id: int,
+  mutate_prob: Prob = 1.0,
+  add_remove_edge_prob: Prob = 0.0001,
+  add_remove_node_prob: Prob = 0.0001,
+  change_activation_prob: Prob = 0.05,
+  change_edge_weight_prob: Prob = 0.05,
+  replace_edge_weight_prob: Prob = 0.005,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
+  change_node_bias_prob: Prob = 0.001,
+  decay_edge_weight_prob: Prob = 0.0,
+  decay_node_bias_prob: Prob = 0.0,
+  grow_edge_prob: Prob = 0.00005,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
+  perturb_weight_strength: Prob = 0.05,
+  perturb_bias_strength: Prob = 0.05,
+  decay_factor: float32 = 0.95
+) {.exportpy.} =
+  let top = topologies[top_id]
+  mutate(top, nn_id)
+
+proc mutate_all(
+  all_top_ids: seq[int]
+) {.exportpy.} =
+
+  for top_id in all_top_ids:
+    let top = topologies[top_id]
+
+    for nn_id in 0 ..< top.population.len:
+      spawn mutate(top, nn_id)
+
+  Weave.sync_root()
 
 proc crossover(
   top_id: int,
@@ -1355,7 +1382,7 @@ proc crossover(
     let new_edge = MetaEdge()
     new_edge[] = rand_edge[]
 
-    let edge = new_edge.get_parent_edge()
+    let edge = find_edge(top, new_edge.edge_id)
 
     if (
       edge.from_node_id notin child_node_index or
@@ -1376,7 +1403,7 @@ proc crossover(
     let new_edge = MetaEdge()
     new_edge[] = disjoint_edge[]
 
-    let edge = new_edge.get_parent_edge()
+    let edge = find_edge(top, new_edge.edge_id)
 
     if (
       edge.from_node_id notin child_node_index or
@@ -1446,6 +1473,7 @@ when is_main_module:
   let hyperneat_top_id = add_topology(3, 1, @[16, 16, 16])
   init_nn(hyperneat_top_id)
   init_population(hyperneat_top_id, 10)
+  mutate_all(@[hyperneat_top_id])
 
   let output1 = evaluate_nn_single(hyperneat_top_id, 0, @[2.0'f32, 3.0, 5.0])
   let trace = evaluate_nn_exec_trace(hyperneat_top_id, 0)

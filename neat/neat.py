@@ -34,6 +34,7 @@ from neat.neat_nim import (
     add_node,
     add_edge,
     mutate,
+    mutate_all,
     evaluate_nn,
     evaluate_nn_single,
     evaluate_population,
@@ -169,8 +170,11 @@ class GeneticAlgorithm:
         num_selected_frac = None,
         tournament_frac = 0.25,
         num_preserve_elites_frac = 0.1,
-        n_jobs = -1
+        n_jobs = -1,
+        use_joblib_parallel = None
     ):
+        use_joblib_parallel = default(use_joblib_parallel, getattr(self, 'use_joblib_parallel', True))
+
         assert exists(num_selected) ^ exists(num_selected_frac)
 
         if exists(num_selected_frac):
@@ -206,9 +210,11 @@ class GeneticAlgorithm:
 
         # 5. mutation
 
-        with with_lock(self.all_top_ids):
-            Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(mutate)(top_id, nn_id) for top_id, nn_id in product(self.all_top_ids, range(num_preserve_elites, self.pop_size)))
-
+        if use_joblib_parallel:
+            with with_lock(self.all_top_ids):
+                Parallel(n_jobs = n_jobs, backend = 'threading')(delayed(mutate)(top_id, nn_id) for top_id, nn_id in product(self.all_top_ids, range(num_preserve_elites, self.pop_size)))
+        else:
+            mutate_all(self.all_top_ids)
 
 class HyperNEAT(GeneticAlgorithm):
     def __init__(
