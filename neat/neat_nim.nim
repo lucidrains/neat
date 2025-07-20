@@ -403,7 +403,7 @@ proc init_nn(
       node_id: node.id,
       disabled: false,
       can_disable: false,
-      can_change_activation: false,
+      can_change_activation: true,
       activation: identity
     )
 
@@ -419,7 +419,7 @@ proc init_nn(
       node_id: node.id,
       disabled: false,
       can_disable: false,
-      can_change_activation: false,
+      can_change_activation: true,
       activation: tanh
     )
 
@@ -1052,16 +1052,16 @@ proc select_and_tournament(
 proc mutate(
   top: Topology,
   nn_id: int,
-  mutate_prob: Prob = 1.0,
-  add_remove_edge_prob: Prob = 0.005,
-  add_remove_node_prob: Prob = 0.005,
-  change_activation_prob: Prob = 0.05,
+  mutate_prob: Prob = 0.95,
+  add_remove_edge_prob: Prob = 0.05,
+  add_remove_node_prob: Prob = 0.05,
+  change_activation_prob: Prob = 0.1,
   change_edge_weight_prob: Prob = 0.05,
   replace_edge_weight_prob: Prob = 0.005,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
-  change_node_bias_prob: Prob = 0.005,
+  change_node_bias_prob: Prob = 0.05,
   decay_edge_weight_prob: Prob = 0.0,
   decay_node_bias_prob: Prob = 0.0,
-  grow_edge_prob: Prob = 1e-5,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_edge_prob: Prob = 1e-3,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1,
@@ -1259,13 +1259,15 @@ proc mutate(
   mutate(top, nn_id)
 
 proc mutate_all(
-  all_top_ids: seq[int]
+  all_top_ids: seq[int],
+  num_preserve_elites: int = 0
 ) {.exportpy.} =
 
   for top_id in all_top_ids:
     let top = topologies[top_id]
+    assert num_preserve_elites < top.population.len
 
-    for nn_id in 0 ..< top.population.len:
+    for nn_id in num_preserve_elites ..< top.population.len:
       mutate(top, nn_id)
 
     set_population_exec_trace(top_id)

@@ -166,7 +166,7 @@ class GeneticAlgorithm:
         num_selected = None,
         num_selected_frac = None,
         tournament_frac = 0.25,
-        num_preserve_elites_frac = 0.1,
+        num_preserve_elites_frac = 0.05,
     ):
 
         assert exists(num_selected) ^ exists(num_selected_frac)
@@ -203,7 +203,7 @@ class GeneticAlgorithm:
 
         # 5. mutation
 
-        mutate_all(self.all_top_ids)
+        mutate_all(self.all_top_ids, num_preserve_elites)
 
 class HyperNEAT(GeneticAlgorithm):
     def __init__(
