@@ -311,7 +311,7 @@ class NEAT(GeneticAlgorithm):
         sample = False,
         temperature = 1.
     ):
-        logits = evaluate_nn_single(self.top.id, index, state.tolist())
+        logits = evaluate_nn_single(self.top.id, index, state.tolist(), use_exec_cache = True)
 
         logits = jnp.array(logits)
 
