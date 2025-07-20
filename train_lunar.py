@@ -137,7 +137,7 @@ for gen in tqdm(range(NUM_GENERATIONS)):
 
             time += 1
 
-        env.close()
+        envs.close()
 
         rewards = jnp.stack(rewards)
 
