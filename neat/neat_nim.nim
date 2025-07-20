@@ -403,7 +403,7 @@ proc init_nn(
       node_id: node.id,
       disabled: false,
       can_disable: false,
-      can_change_activation: true,
+      can_change_activation: false,
       activation: identity
     )
 
@@ -1055,13 +1055,13 @@ proc mutate(
   mutate_prob: Prob = 0.95,
   add_remove_edge_prob: Prob = 0.05,
   add_remove_node_prob: Prob = 0.05,
-  change_activation_prob: Prob = 0.1,
-  change_edge_weight_prob: Prob = 0.05,
-  replace_edge_weight_prob: Prob = 0.005,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
-  change_node_bias_prob: Prob = 0.05,
+  change_activation_prob: Prob = 0.01,
+  change_edge_weight_prob: Prob = 0.01,
+  replace_edge_weight_prob: Prob = 0.05,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
+  change_node_bias_prob: Prob = 0.01,
   decay_edge_weight_prob: Prob = 0.0,
   decay_node_bias_prob: Prob = 0.0,
-  grow_edge_prob: Prob = 1e-3,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_edge_prob: Prob = 1e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1,
@@ -1243,13 +1243,13 @@ proc mutate(
   mutate_prob: Prob = 1.0,
   add_remove_edge_prob: Prob = 0.0001,
   add_remove_node_prob: Prob = 0.0001,
-  change_activation_prob: Prob = 0.05,
-  change_edge_weight_prob: Prob = 0.05,
+  change_activation_prob: Prob = 0.005,
+  change_edge_weight_prob: Prob = 0.005,
   replace_edge_weight_prob: Prob = 0.005,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
   change_node_bias_prob: Prob = 0.001,
   decay_edge_weight_prob: Prob = 0.0,
   decay_node_bias_prob: Prob = 0.0,
-  grow_edge_prob: Prob = 0.00005,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_edge_prob: Prob = 5e-5,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
   perturb_weight_strength: Prob = 0.05,
   perturb_bias_strength: Prob = 0.05,
