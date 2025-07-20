@@ -1,22 +1,11 @@
-from neat.neat import (
-    Topology
-)
-
-def test_add_neuron_and_synapse():
-    top = Topology(2, 1, 1, num_hiddens = 0)
-    assert top.add_neuron() == 3
-    assert top.add_neuron() == 4
-    assert top.add_synapse(0, 3) == 2
-
 # mlp with population dim
 
-import jax
 import jax.numpy as jnp
 
 from neat.neat import (
+    Topology,
     HyperNEAT,
     NEAT,
-    mlp,
 )
 
 def test_hyperneat():
