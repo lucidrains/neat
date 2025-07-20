@@ -67,7 +67,7 @@ proc satisfy_prob(
 proc coin_flip(): bool =
   return satisfy_prob(0.5)
 
-proc random_normal(): float =
+proc random_normal(): float32 =
   # box-muller for random normal
   let
     u1 = rand(1.0)
@@ -78,8 +78,8 @@ proc random_normal(): float =
 # normalization
 
 proc min_max_norm(
-  fitnesses: seq[float]
-): seq[float] =
+  fitnesses: seq[float32]
+): seq[float32] =
 
   let
     min = fitnesses.min
@@ -94,25 +94,25 @@ proc min_max_norm(
 
 # activation functions
 
-proc sigmoid(x: float): float =
+proc sigmoid(x: float32): float32 =
   return (1.0 / (1.0 + exp(-x)))
 
-proc relu(x: float): float =
+proc relu(x: float32): float32 =
   return max(x, 0.0)
 
-proc gauss(x: float): float =
+proc gauss(x: float32): float32 =
   return exp(-pow(x, 2))
 
-proc identity(x: float): float =
+proc identity(x: float32): float32 =
   return x
 
-proc elu(x: float): float =
+proc elu(x: float32): float32 =
   if x >= 0.0:
     result = x
   else:
     result = exp(x) - 1.0
 
-proc clamp_one(x: float): float =
+proc clamp_one(x: float32): float32 =
   return max(min(x, 1.0), -1.0)
 
 type
@@ -128,13 +128,13 @@ type
     num_nodes: int
 
   WeightUpdate = tuple
-    weight: float
+    weight: float32
     from_node_id: int
 
   NodeUpdate = tuple
     to_node_id: int
     activation_id: int
-    bias: float
+    bias: float32
     trace: seq[WeightUpdate]
 
   ExecTrace = tuple
@@ -162,13 +162,13 @@ type
     can_disable: bool
     can_change_activation: bool = true
     activation: Activation = tanh
-    bias: float = 0.0
+    bias: float32 = 0.0
 
   MetaEdge = ref object
     topology_id: int
     edge_id: int
     disabled: bool
-    weight: float
+    weight: float32
     local_from_node_id: int
     local_to_node_id: int
 
@@ -204,7 +204,7 @@ type
 
   ParentAndFitness = tuple
     index: int
-    fitness: float
+    fitness: float32
 
   Couple = tuple
     parent1: ParentAndFitness
@@ -253,9 +253,9 @@ proc get_topology_info(
 proc add_node(topology_id: int, node_type: NodeType = hidden): int
 proc add_edge(topology_id: int, from_node_id: int, to_node_id: int): int
 
-proc activate(act: Activation, input: Tensor[float]): Tensor[float] {.gcsafe.}
-proc activate(act: Activation, input: float): float {.gcsafe.}
-proc activate(node: MetaNode, input: Tensor[float]): Tensor[float] {.gcsafe.}
+proc activate(act: Activation, input: Tensor[float32]): Tensor[float32] {.gcsafe.}
+proc activate(act: Activation, input: float32): float32 {.gcsafe.}
+proc activate(node: MetaNode, input: Tensor[float32]): Tensor[float32] {.gcsafe.}
 
 proc rand_activation(): Activation
 
@@ -380,7 +380,7 @@ proc add_edge(
 
 proc init_nn(
   top_id: int,
-  sparsity: float = 0.05
+  sparsity: float32 = 0.05
 ) =
   let top = topologies[top_id]
 
@@ -498,10 +498,10 @@ proc init_population(
 proc evaluate_nn(
   top_id: int,
   nn_id: int,
-  seq_inputs: seq[seq[float]]
-): seq[seq[float]] {.exportpy.} =
+  seq_inputs: seq[seq[float32]]
+): seq[seq[float32]] {.exportpy.} =
 
-  let inputs = seq_inputs.map(seq_float => seq_float.to_tensor)
+  let inputs = seq_inputs.map(seq_float32 => seq_float32.to_tensor)
 
   let top = topologies[top_id]
   let nn = top.population[nn_id]
@@ -515,7 +515,7 @@ proc evaluate_nn(
 
   var visited = new_bit_vector[uint](num_nodes)
   var finished = new_bit_vector[uint](num_nodes)
-  var values = new_seq[Tensor[float]](num_nodes)
+  var values = new_seq[Tensor[float32]](num_nodes)
 
   # global to local node indices
 
@@ -552,7 +552,7 @@ proc evaluate_nn(
   proc compute_node_value(
     index: int,
     visited: BitVector
-  ): Tensor[float] =
+  ): Tensor[float32] =
 
     if finished[index] == 1:
       return values[index]
@@ -564,11 +564,11 @@ proc evaluate_nn(
     var next_visited = visited
     next_visited[index] = 1
 
-    var node_value = zeros[float](one_input_shape) +. meta_node.bias
+    var node_value = zeros[float32](one_input_shape) +. meta_node.bias
 
     # find all edges
 
-    var input_node_index_and_weight: seq[(float, int)] = @[] # omit visited
+    var input_node_index_and_weight: seq[(float32, int)] = @[] # omit visited
 
     for meta_edge in nn.meta_edges:
       if meta_edge.disabled:
@@ -665,8 +665,8 @@ proc evaluate_nn_exec_trace(
     trace.add((
       i,
       input_node.activation.ord,
-      0.0,
-      @[(1.0, node_index)]
+      0.0'f32,
+      @[(1.0'f32, node_index)]
     ))
 
   # proc for fetching value of node at a given meta node index
@@ -689,7 +689,7 @@ proc evaluate_nn_exec_trace(
 
     # find all edges
 
-    var input_node_index_and_weight: seq[(float, int)] = @[] # omit visited
+    var input_node_index_and_weight: seq[(float32, int)] = @[] # omit visited
 
     for meta_edge in nn.meta_edges:
       if meta_edge.disabled:
@@ -716,7 +716,7 @@ proc evaluate_nn_exec_trace(
 
     # get weighted sum of inputs to the node
 
-    var multiplies: seq[(float, int)] = @[]
+    var multiplies: seq[(float32, int)] = @[]
 
     for entry in input_node_index_and_weight:
       let (weight, local_from_node_id) = entry
@@ -752,18 +752,18 @@ proc evaluate_nn_exec_trace(
 
 proc evaluate_nn_with_trace(
   trace_with_meta_info: ExecTrace,
-  inputs: seq[seq[float]]
-): seq[seq[float]] {.gcsafe exportpy.} =
+  inputs: seq[seq[float32]]
+): seq[seq[float32]] {.gcsafe exportpy.} =
 
   var (meta_info, trace) = trace_with_meta_info
   let (num_inputs, num_outputs, num_nodes) = meta_info
 
-  let seq_inputs_tensor = inputs.map(seq_float => seq_float.to_tensor)
+  let seq_inputs_tensor = inputs.map(seq_float32 => seq_float32.to_tensor)
 
   let one_input = seq_inputs_tensor[0]
   let one_input_shape = one_input.shape
 
-  var values = new_seq_with(num_nodes, zeros[float](one_input_shape))
+  var values = new_seq_with(num_nodes, zeros[float32](one_input_shape))
 
   values &= seq_inputs_tensor
 
@@ -785,9 +785,9 @@ proc evaluate_nn_with_trace(
 proc evaluate_nn_single(
   top_id: int,
   nn_id: int,
-  inputs: seq[float],
+  inputs: seq[float32],
   use_exec_cache: bool = false
-): seq[float] {.exportpy.} =
+): seq[float32] {.exportpy.} =
 
   let seq_inputs = inputs.map(value => @[value])
 
@@ -806,12 +806,12 @@ proc evaluate_nn_single(
 
 proc evaluate_nn_single_with_trace_thread_fn(
   trace: ptr ExecTrace,
-  buffer_input: ptr UncheckedArray[float],
-  buffer_output: ptr UncheckedArray[float]
+  buffer_input: ptr UncheckedArray[float32],
+  buffer_output: ptr UncheckedArray[float32]
 ) {.gcsafe.} =
 
   let num_inputs = trace[].node_info.num_inputs
-  var inputs = new_seq[float](num_inputs)
+  var inputs = new_seq[float32](num_inputs)
 
   for i in 0 ..< num_inputs:
     inputs[i] = buffer_input[i]
@@ -836,8 +836,8 @@ proc evaluate_nn_exec_trace_thread_fn(
 
 proc evaluate_population(
   top_id: int,
-  inputs: seq[seq[float]]
-): seq[seq[float]] {.exportpy.} =
+  inputs: seq[seq[float32]]
+): seq[seq[float32]] {.exportpy.} =
 
   let top = topologies[top_id]
 
@@ -855,7 +855,7 @@ proc evaluate_population(
 
   # using weave for multi-threading
 
-  let output = new_seq_with(top.population.len, new_seq[float](top.num_outputs))
+  let output = new_seq_with(top.population.len, new_seq[float32](top.num_outputs))
 
   for nn_id in 0 ..< inputs.len:
 
@@ -863,8 +863,8 @@ proc evaluate_population(
 
     # input and output buffers for thread
 
-    let buffer_input = cast[ptr UncheckedArray[float]](inputs[nn_id][0].addr)
-    let buffer_output = cast[ptr UncheckedArray[float]](output[nn_id][0].addr)
+    let buffer_input = cast[ptr UncheckedArray[float32]](inputs[nn_id][0].addr)
+    let buffer_output = cast[ptr UncheckedArray[float32]](output[nn_id][0].addr)
 
     # spawn thread
 
@@ -882,7 +882,7 @@ proc generate_hyper_weights(
   top_id: int,
   nn_id: int,
   shape: seq[int]
-): seq[float] {.exportpy.} =
+): seq[float32] {.exportpy.} =
 
   let top = topologies[top_id]
 
@@ -892,11 +892,11 @@ proc generate_hyper_weights(
     first_axis = shape[0]
     rest_axis = shape[1..^1]
 
-  var coors = linspace(-1.0, 1.0, shape[0])
+  var coors = linspace(-1.0, 1.0, shape[0]).as_type(float32)
   coors = coors.reshape(1, first_axis)
 
   for dim in rest_axis:
-    var next_dim_coors = linspace(0.0, 1.0, dim)
+    var next_dim_coors = linspace(0.0, 1.0, dim).as_type(float32)
     next_dim_coors = next_dim_coors.reshape(1, 1, dim).broadcast(1, coors.shape[1], dim)
     coors = coors.reshape(coors.shape[0], coors.shape[1], 1).broadcast(coors.shape[0], coors.shape[1], dim)
     coors = concat(coors, next_dim_coors, axis = 0)
@@ -909,22 +909,22 @@ proc generate_hyper_weights(
 
 proc activate(
   node: MetaNode,
-  input: Tensor[float]
-): Tensor[float] {.gcsafe.} =
+  input: Tensor[float32]
+): Tensor[float32] {.gcsafe.} =
 
   return activate(node.activation, input)
 
 proc activate(
   act: Activation,
-  input: Tensor[float]
-): Tensor[float]  {.gcsafe.} =
+  input: Tensor[float32]
+): Tensor[float32]  {.gcsafe.} =
 
   return input.map(value => activate(act, value))
 
 proc activate(
   act: Activation,
-  input: float
-): float {.gcsafe.} =
+  input: float32
+): float32 {.gcsafe.} =
 
   if act == identity:
     return input
@@ -953,7 +953,7 @@ proc rand_activation(): Activation =
 # mutation and crossover
 
 proc tournament(
-  fitnesses: seq[float],
+  fitnesses: seq[float32],
   num_tournaments: range[1..int.high],
   tournament_size: range[2..int.high]
 ): Couples {.exportpy.} =
@@ -964,7 +964,7 @@ proc tournament(
 
     var
       parent1, parent2: int = -1
-      fitness1, fitness2: float = -1e6
+      fitness1, fitness2: float32 = -1e6
 
     shuffle(gene_ids)
     let tournament = gene_ids[0..<tournament_size]
@@ -986,13 +986,13 @@ proc tournament(
 
 proc select_and_tournament(
   top_ids: seq[int],
-  fitnesses: seq[float],
+  fitnesses: seq[float32],
   num_selected: range[1..int.high],
   tournament_size: range[2..int.high]
 ): (
   seq[int],
-  seq[float],
-  seq[((int, float), (int, float))]
+  seq[float32],
+  seq[((int, float32), (int, float32))]
 ) {.exportpy.} =
 
   assert top_ids.len > 0
@@ -1034,19 +1034,19 @@ proc mutate(
   top_id: int,
   nn_id: int,
   mutate_prob: Prob = 1.0,
-  add_remove_edge_prob: Prob = 0.01,
-  add_remove_node_prob: Prob = 0.01,
-  change_activation_prob: Prob = 0.01,
-  change_edge_weight_prob: Prob = 0.15,
-  replace_edge_weight_prob: Prob = 0.25,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
-  change_node_bias_prob: Prob = 0.08,
+  add_remove_edge_prob: Prob = 0.0001,
+  add_remove_node_prob: Prob = 0.0001,
+  change_activation_prob: Prob = 0.05,
+  change_edge_weight_prob: Prob = 0.05,
+  replace_edge_weight_prob: Prob = 0.005,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
+  change_node_bias_prob: Prob = 0.001,
   decay_edge_weight_prob: Prob = 0.0,
   decay_node_bias_prob: Prob = 0.0,
-  grow_edge_prob: Prob = 0.05,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_edge_prob: Prob = 0.00005,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
   perturb_weight_strength: Prob = 0.05,
   perturb_bias_strength: Prob = 0.05,
-  decay_factor: float = 0.95
+  decay_factor: float32 = 0.95
 ) {.exportpy.} =
 
   let top = topologies[top_id]
@@ -1229,9 +1229,9 @@ proc crossover(
   top_id: int,
   first_parent_nn_id: int,
   second_parent_nn_id: int,
-  first_parent_fitness: float,
-  second_parent_fitness: float,
-  fitness_diff_is_same: float = 0.0
+  first_parent_fitness: float32,
+  second_parent_fitness: float32,
+  fitness_diff_is_same: float32 = 0.0
 ): NeuralNetwork {.exportpy.} =
 
   let top = topologies[top_id]
@@ -1404,7 +1404,7 @@ proc crossover(
 proc crossover_one_couple_and_add_to_population(
   top_id: int,
   couple: Couple,
-  fitness_diff_is_same: float = 0.0
+  fitness_diff_is_same: float32 = 0.0
 ) {.exportpy.} =
 
   let top = topologies[top_id]
@@ -1422,7 +1422,7 @@ proc crossover_one_couple_and_add_to_population(
 proc crossover_and_add_to_population(
   top_id: int,
   couples: Couples,
-  fitness_diff_is_same: float = 0.0
+  fitness_diff_is_same: float32 = 0.0
 ) {.exportpy.} =
 
   let top = topologies[top_id]
@@ -1447,17 +1447,17 @@ when is_main_module:
   init_nn(hyperneat_top_id)
   init_population(hyperneat_top_id, 10)
 
-  let output1 = evaluate_nn_single(hyperneat_top_id, 0, @[2.0, 3.0, 5.0])
+  let output1 = evaluate_nn_single(hyperneat_top_id, 0, @[2.0'f32, 3.0, 5.0])
   let trace = evaluate_nn_exec_trace(hyperneat_top_id, 0)
-  let output2 = evaluate_nn_single(hyperneat_top_id, 0, @[2.0, 3.0, 5.0], use_exec_cache = true)
+  let output2 = evaluate_nn_single(hyperneat_top_id, 0, @[2.0'f32, 3.0, 5.0], use_exec_cache = true)
 
   assert output1 == output2
 
   benchmark("non cached", 100):
-    discard evaluate_nn_single(hyperneat_top_id, 0, @[2.0, 3.0, 5.0])
+    discard evaluate_nn_single(hyperneat_top_id, 0, @[2.0'f32, 3.0, 5.0])
 
   benchmark("cached", 100):
-    discard evaluate_nn_single(hyperneat_top_id, 0, @[2.0, 3.0, 5.0], use_exec_cache = true)
+    discard evaluate_nn_single(hyperneat_top_id, 0, @[2.0'f32, 3.0, 5.0], use_exec_cache = true)
 
   discard crossover(hyperneat_top_id, 0, 1, 0.5, 0.3)
 
@@ -1472,6 +1472,6 @@ when is_main_module:
   init_population(neat_top_id, 3)
 
   benchmark("population", 10):
-    discard evaluate_population(neat_top_id, @[@[2.0, 3.0, 5.0], @[3.0, 5.0, 7.0], @[3.0, 5.0, 7.0]])
+    discard evaluate_population(neat_top_id, @[@[2.0'f32, 3.0, 5.0], @[3.0'f32, 5.0, 7.0], @[3.0'f32, 5.0, 7.0]])
 
   remove_topology(neat_top_id)

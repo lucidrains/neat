@@ -22,8 +22,8 @@ def divisible_by(num, den):
 NUM_GENERATIONS = 1000
 
 TEST_REGULAR_NEAT = True
-POP_SIZE = 250
-NUM_CPPN_HIDDEN_NODES = 16
+POP_SIZE = 100
+NUM_CPPN_HIDDEN_NODES = 12
 NUM_HIDDEN_LAYERS = 0
 
 RECORD_EVERY = 10
@@ -136,6 +136,8 @@ for gen in tqdm(range(NUM_GENERATIONS)):
                 break
 
             time += 1
+
+        env.close()
 
         rewards = jnp.stack(rewards)
 
