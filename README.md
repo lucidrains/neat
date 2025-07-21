@@ -64,3 +64,13 @@ $ pip install '.[gym]' && python train_lunar.py
     year    = {2002}
 }
 ```
+
+```bibtex
+@article{Hornby2006AutomatedAD,
+    title   = {Automated Antenna Design with Evolutionary Algorithms},
+    author  = {Gregory Hornby and Al Globus and Derek S. Linden and Jason D. Lohn},
+    journal = {Space},
+    year    = {2006},
+    url     = {https://api.semanticscholar.org/CorpusID:8290212}
+}
+```
