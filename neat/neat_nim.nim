@@ -68,30 +68,15 @@ proc satisfy_prob(
 proc coin_flip(): bool =
   return satisfy_prob(0.5)
 
-proc random_normal(): float32 =
+proc random_normal(
+  eps: float = 1e-30
+): float32 =
   # box-muller for random normal
   let
     u1 = rand(1.0)
     u2 = rand(1.0)
 
-  return sqrt(-2 * ln(u1)) * cos(2 * PI * u2)
-
-# normalization
-
-proc min_max_norm(
-  fitnesses: seq[float32]
-): seq[float32] =
-
-  let
-    min = fitnesses.min
-    max = fitnesses.max
-
-  let divisor = max - min
-
-  if divisor == 0.0:
-    return fitnesses
-
-  return fitnesses.map((fitness) => (fitness - min) / divisor)
+  return sqrt(-2 * ln(max(eps, u1))) * cos(2 * PI * u2)
 
 # activation functions
 
