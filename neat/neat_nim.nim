@@ -192,6 +192,7 @@ type
 
     nodes_index: Table[int, Node]
     edges_index: Table[int, Edge]
+    conn_index: Table[(int, int), int]
 
     num_inputs: int
     num_outputs: int
@@ -267,6 +268,7 @@ proc add_topology(
 
   topology.nodes_index = init_table[int, Node]()
   topology.edges_index = init_table[int, Edge]()
+  topology.conn_index = init_table[(int, int), int]()
 
   topologies[topology.id] = topology
 
@@ -361,6 +363,7 @@ proc add_edge(
 
   top.edges.add(edge)
   top.edges_index[edge.id] = edge
+  top.conn_index[(from_node_id, to_node_id)] = edge.id
 
   return edge.id
 
@@ -1049,19 +1052,17 @@ proc mutate(
   top: Topology,
   nn_id: int,
   mutate_prob: Prob = 0.95,
-  add_remove_edge_prob: Prob = 0.05,
+  add_novel_edge_prob: Prob = 5e-3,
+  toggle_meta_edge_prob: Prob = 0.05,
   add_remove_node_prob: Prob = 0.05,
   change_activation_prob: Prob = 0.01,
   change_edge_weight_prob: Prob = 0.8,
   replace_edge_weight_prob: Prob = 0.1,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
   change_node_bias_prob: Prob = 0.15,
-  decay_edge_weight_prob: Prob = 0.0,
-  decay_node_bias_prob: Prob = 0.0,
   grow_edge_prob: Prob = 5e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1,
-  decay_factor: float32 = 0.95
 ) {.gcsafe exportpy.} =
 
   let nn = top.population[nn_id]
@@ -1071,6 +1072,9 @@ proc mutate(
 
   var node_index = init_table[int, int]()
   var edge_index = init_table[int, int]()
+
+  var global_conn_index = top.conn_index
+  var local_conn_index = init_table[(int, int), int]()
 
   # mutating nodes
 
@@ -1087,9 +1091,6 @@ proc mutate(
 
     if satisfy_prob(change_node_bias_prob):
       meta_node.bias += random_normal() * perturb_bias_strength
-
-    if satisfy_prob(decay_node_bias_prob):
-      meta_node.bias *= decay_factor
 
   # add / remove node
 
@@ -1144,9 +1145,6 @@ proc mutate(
       else:
         meta_edge.weight += random_normal() * perturb_weight_strength
 
-    if satisfy_prob(decay_edge_weight_prob):
-      meta_edge.weight *= decay_factor
-
     # maybe splitting an edge
     # this is the novel mutation introduced in the original NEAT paper
 
@@ -1199,38 +1197,55 @@ proc mutate(
 
       nn.meta_edges.add(meta_edge_outgoing)
 
-  # add / remove edge
+    # toggling an existing edge gene in the individual
 
-  for edge in top.edges:
-    # enabling / disabling an edge
-
-    if not satisfy_prob(add_remove_edge_prob):
+    if not satisfy_prob(toggle_meta_edge_prob):
       continue
-
-    if (
-      edge.from_node_id notin node_index or
-      edge.to_node_id notin node_index
-    ):
-      continue
-
-    if edge.id notin edge_index:
-      let new_meta_edge = MetaEdge(
-        topology_id: top.id,
-        edge_id: edge.id,
-        local_from_node_id: node_index[edge.from_node_id],
-        local_to_node_id: node_index[edge.to_node_id],
-        disabled: true
-      )
-
-      edge_index[edge.id] = nn.meta_edges.len
-      nn.meta_edges.add(new_meta_edge)
-
-    let meta_edge_id = edge_index[edge.id]
-    let meta_edge = nn.meta_edges[meta_edge_id]
 
     meta_edge.disabled = meta_edge.disabled xor true
     if not meta_edge.disabled:
       meta_edge.weight = random_normal()
+
+  # adding of a novel edge to the gene pool + the individual
+
+  if satisfy_prob(add_novel_edge_prob):
+    let existing_node_ids = node_index.keys.to_seq
+    let cartesian_prod = product(@[existing_node_ids, existing_node_ids])
+
+    # allow for node to connect to itself, and allow that to be expressed at some future date in evaluate
+
+    let random_conn = sample(cartesian_prod)
+    let (from_node_id, to_node_id) = (random_conn[0], random_conn[1])
+    let random_conn_tuple = (from_node_id, to_node_id)
+
+    let exists_in_gene_pool = global_conn_index.has_key(random_conn_tuple)
+
+    # register novel edge in gene pool if not exists
+
+    let edge_id = if not exists_in_gene_pool:
+      add_edge(top, from_node_id, to_node_id)
+    else:
+      global_conn_index[random_conn_tuple]
+
+    # # now add it to the individual
+
+    let meta_edge = if not edge_index.has_key(edge_id):
+      let new_meta_edge = MetaEdge(
+        topology_id: top.id,
+        edge_id: edge_id,
+        disabled: true,
+        local_from_node_id: node_index[from_node_id],
+        local_to_node_id: node_index[to_node_id],
+        weight: random_normal()
+      )
+
+      nn.meta_edges.add(new_meta_edge)
+      edge_index[edge_id] = nn.meta_edges.len
+      new_meta_edge
+    else:
+      nn.meta_edges[edge_index[edge_id]]
+
+    meta_edge.disabled = false
 
   # just remove cached trace for now
   # properly detect change in future
@@ -1240,20 +1255,18 @@ proc mutate(
 proc mutate(
   top_id: int,
   nn_id: int,
-  mutate_prob: Prob = 1.0,
-  add_remove_edge_prob: Prob = 0.0001,
-  add_remove_node_prob: Prob = 0.0001,
-  change_activation_prob: Prob = 0.005,
-  change_edge_weight_prob: Prob = 0.005,
-  replace_edge_weight_prob: Prob = 0.005,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
-  change_node_bias_prob: Prob = 0.001,
-  decay_edge_weight_prob: Prob = 0.0,
-  decay_node_bias_prob: Prob = 0.0,
-  grow_edge_prob: Prob = 5e-5,            # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  mutate_prob: Prob = 0.95,
+  add_novel_edge_prob: Prob = 5e-3,
+  toggle_meta_edge_prob: Prob = 0.05,
+  add_remove_node_prob: Prob = 0.05,
+  change_activation_prob: Prob = 0.01,
+  change_edge_weight_prob: Prob = 0.8,
+  replace_edge_weight_prob: Prob = 0.1,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
+  change_node_bias_prob: Prob = 0.15,
+  grow_edge_prob: Prob = 5e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
-  perturb_weight_strength: Prob = 0.05,
-  perturb_bias_strength: Prob = 0.05,
-  decay_factor: float32 = 0.95
+  perturb_weight_strength: Prob = 0.1,
+  perturb_bias_strength: Prob = 0.1,
 ) {.exportpy.} =
   let top = topologies[top_id]
   mutate(top, nn_id)
@@ -1285,10 +1298,6 @@ proc crossover(
 
   let parent1 = top.population[first_parent_nn_id]
   let parent2 = top.population[second_parent_nn_id]
-
-  # absolute fitness difference
-
-  let fitness_difference = abs(first_parent_fitness - second_parent_fitness)
 
   # child
 
