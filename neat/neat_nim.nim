@@ -421,7 +421,7 @@ proc init_nn(
       can_disable: true,
       bias: random_normal(),
       can_change_activation: false,
-      activation: relu
+      activation: if coin_flip(): relu else: sigmoid
     )
 
     node_index[node.id] = nn.meta_nodes.len
@@ -675,8 +675,6 @@ proc evaluate_nn_exec_trace(
     # find all edges
 
     var input_node_index_and_weight: seq[(float32, int)] = @[] # omit visited
-
-    shuffle(nn.meta_edges) # no constraints on acyclic graph, will eventually add cycles as an option, so it resembles reservoir
 
     for meta_edge in nn.meta_edges:
       if meta_edge.disabled:
@@ -1058,15 +1056,16 @@ proc mutate(
   mutate_prob: Prob = 0.95,
   add_novel_edge_prob: Prob = 5e-3,
   toggle_meta_edge_prob: Prob = 0.05,
-  add_remove_node_prob: Prob = 0.05,
-  change_activation_prob: Prob = 0.01,
+  add_remove_node_prob: Prob = 0.01,
+  change_activation_prob: Prob = 0.001,
   change_edge_weight_prob: Prob = 0.8,
-  replace_edge_weight_prob: Prob = 0.1,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
-  change_node_bias_prob: Prob = 0.15,
+  replace_edge_weight_prob: Prob = 0.1,    # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
+  change_node_bias_prob: Prob = 0.6,
+  replace_node_bias_prob: Prob = 0.1,
   grow_edge_prob: Prob = 5e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
-  perturb_weight_strength: Prob = 0.1,
-  perturb_bias_strength: Prob = 0.1,
+  perturb_weight_strength: Prob = 0.05,
+  perturb_bias_strength: Prob = 0.05,
 ) {.gcsafe exportpy.} =
 
   let nn = top.population[nn_id]
@@ -1094,12 +1093,15 @@ proc mutate(
       continue
 
     if satisfy_prob(change_node_bias_prob):
-      meta_node.bias += random_normal() * perturb_bias_strength
+      if satisfy_prob(replace_node_bias_prob):
+        meta_node.bias = random_normal()
+      else:
+        meta_node.bias += random_normal() * perturb_bias_strength
 
   # add / remove node
 
   for node in top.nodes:
-    # enabling / disabling an edge
+    # enabling / disabling an node
 
     if not satisfy_prob(add_remove_node_prob):
       continue
@@ -1108,9 +1110,9 @@ proc mutate(
       let new_meta_node = MetaNode(
         topology_id: top.id,
         node_id: node.id,
-        activation: relu,
-        can_change_activation: false,
-        can_disable: false, # only inputs and outputs are locked
+        activation: if coin_flip(): relu else: sigmoid,
+        can_change_activation: coin_flip(),
+        can_disable: true, # only inputs and outputs are locked
         disabled: true
       )
 
@@ -1174,8 +1176,8 @@ proc mutate(
       let meta_node = MetaNode(
         topology_id: top.id,
         node_id: node_id,
-        activation: relu,
-        can_change_activation: false,
+        activation: if coin_flip(): relu else: sigmoid,
+        can_change_activation: coin_flip(),
       )
 
       let new_local_node_id = nn.meta_nodes.len
@@ -1214,12 +1216,11 @@ proc mutate(
 
   if satisfy_prob(add_novel_edge_prob):
     let existing_node_ids = node_index.keys.to_seq
-    let cartesian_prod = product(@[existing_node_ids, existing_node_ids])
-
-    # allow for node to connect to itself, and allow that to be expressed at some future date in evaluate
+    let cartesian_prod = product(@[existing_node_ids, existing_node_ids]).filter(pair => pair[0] != pair[1])
 
     let random_conn = sample(cartesian_prod)
     let (from_node_id, to_node_id) = (random_conn[0], random_conn[1])
+
     let random_conn_tuple = (from_node_id, to_node_id)
 
     let exists_in_gene_pool = global_conn_index.has_key(random_conn_tuple)
@@ -1237,7 +1238,6 @@ proc mutate(
       let new_meta_edge = MetaEdge(
         topology_id: top.id,
         edge_id: edge_id,
-        disabled: true,
         local_from_node_id: node_index[from_node_id],
         local_to_node_id: node_index[to_node_id],
         weight: random_normal()
@@ -1262,7 +1262,7 @@ proc mutate(
   mutate_prob: Prob = 0.95,
   add_novel_edge_prob: Prob = 5e-3,
   toggle_meta_edge_prob: Prob = 0.05,
-  add_remove_node_prob: Prob = 0.05,
+  add_remove_node_prob: Prob = 0.01,
   change_activation_prob: Prob = 0.01,
   change_edge_weight_prob: Prob = 0.8,
   replace_edge_weight_prob: Prob = 0.1,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing

@@ -166,7 +166,7 @@ class GeneticAlgorithm:
         num_selected = None,
         num_selected_frac = None,
         tournament_frac = 0.25,
-        num_preserve_elites_frac = 0.05,
+        num_preserve_elites_frac = 0.0,
     ):
 
         assert exists(num_selected) ^ exists(num_selected_frac)
