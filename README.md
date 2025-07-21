@@ -9,7 +9,7 @@ Explorations into NEAT and some of its derivative research
 ## quick test
 
 ```bash
-$ sh install.sh
+$ sh install_gym.sh
 ```
 
 Then
