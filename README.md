@@ -1,3 +1,7 @@
+<img src="./samples/neat-90.gif" width="500px"></img>
+
+*90 generation - neat pop 100*
+
 ## neat (wip)
 
 Explorations into NEAT and some of its derivative research
