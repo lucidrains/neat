@@ -1351,7 +1351,11 @@ proc crossover(
     disjoint_node_ids: seq[int] = @[]
     disjoint_edge_ids: seq[int] = @[]
 
-  if first_parent_fitness <= second_parent_fitness:
+  # add a little noise for randomly tie-breaking parent one and two when scores are identical
+
+  let noised_first_parent_fitness = first_parent_fitness + random_normal() * 1e-2
+
+  if noised_first_parent_fitness <= second_parent_fitness:
     disjoint_nodes_index = parent2_nodes_index
     disjoint_edges_index = parent2_edges_index
     disjoint_node_ids = (parent2_node_set - parent1_node_set).to_seq
