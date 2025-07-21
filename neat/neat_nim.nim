@@ -1298,7 +1298,8 @@ proc crossover(
   second_parent_nn_id: int,
   first_parent_fitness: float32,
   second_parent_fitness: float32,
-  prob_child_disabled_given_parent_cond: float32 = 0.75
+  prob_child_disabled_given_parent_cond: float32 = 0.75,
+  prob_inherit_all_excess_genes: float32 = 1.0
 ): NeuralNetwork {.exportpy.} =
 
   # parents
@@ -1358,21 +1359,23 @@ proc crossover(
     disjoint_node_ids: seq[int] = @[]
     disjoint_edge_ids: seq[int] = @[]
 
-  # add a little noise for randomly tie-breaking parent one and two when scores are identical
+  if satisfy_prob(prob_inherit_all_excess_genes):
 
-  let noised_first_parent_fitness = first_parent_fitness + random_normal() * 1e-2
+    # add a little noise for randomly tie-breaking parent one and two when scores are identical
 
-  if noised_first_parent_fitness <= second_parent_fitness:
-    disjoint_nodes_index = parent2_nodes_index
-    disjoint_edges_index = parent2_edges_index
-    disjoint_node_ids = (parent2_node_set - parent1_node_set).to_seq
-    disjoint_edge_ids = (parent2_edge_set - parent1_edge_set).to_seq
+    let noised_first_parent_fitness = first_parent_fitness + random_normal() * 1e-2
 
-  else:
-    disjoint_nodes_index = parent1_nodes_index
-    disjoint_edges_index = parent1_edges_index
-    disjoint_node_ids = (parent1_node_set - parent2_node_set).to_seq
-    disjoint_edge_ids = (parent1_edge_set - parent2_edge_set).to_seq
+    if noised_first_parent_fitness <= second_parent_fitness:
+      disjoint_nodes_index = parent2_nodes_index
+      disjoint_edges_index = parent2_edges_index
+      disjoint_node_ids = (parent2_node_set - parent1_node_set).to_seq
+      disjoint_edge_ids = (parent2_edge_set - parent1_edge_set).to_seq
+
+    else:
+      disjoint_nodes_index = parent1_nodes_index
+      disjoint_edges_index = parent1_edges_index
+      disjoint_node_ids = (parent1_node_set - parent2_node_set).to_seq
+      disjoint_edge_ids = (parent1_edge_set - parent2_edge_set).to_seq
 
   # new child node index
 
