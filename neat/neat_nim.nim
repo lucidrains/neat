@@ -190,6 +190,9 @@ type
     nodes: seq[Node] = @[] # nodes will be always arrange [input] [output] [hiddens]
     edges: seq[Edge] = @[]
 
+    nodes_index: Table[int, Node]
+    edges_index: Table[int, Edge]
+
     num_inputs: int
     num_outputs: int
     num_hiddens: seq[int] = @[]
@@ -224,21 +227,7 @@ type
 var topologies = init_table[int, Topology]()
 var topology_id: Atomic[int]
 
-
 # helper accessors
-
-proc get_parent_node(meta_node: MetaNode): Node =
-  let top = topologies[meta_node.topology_id]
-
-  for node in top.nodes:
-    if node.id == meta_node.node_id:
-      result = node
-
-proc find_edge(top: Topology, edge_id: int): Edge =
-
-  for edge in top.edges:
-    if edge.id == edge_id:
-      result = edge
 
 proc get_topology_info(
   top_id: int
@@ -275,6 +264,9 @@ proc add_topology(
     num_outputs: num_outputs,
     num_hiddens: num_hiddens
   )
+
+  topology.nodes_index = init_table[int, Node]()
+  topology.edges_index = init_table[int, Edge]()
 
   topologies[topology.id] = topology
 
@@ -342,6 +334,8 @@ proc add_node(
 
   let node = Node(id: top.node_innovation_id.fetch_add(1), topology_id: top.id)
   top.nodes.add(node)
+  top.nodes_index[node.id] = node
+
   return node.id
 
 proc add_edge(
@@ -366,6 +360,8 @@ proc add_edge(
   )
 
   top.edges.add(edge)
+  top.edges_index[edge.id] = edge
+
   return edge.id
 
 # main evolutionary functions
@@ -436,8 +432,8 @@ proc init_nn(
       disabled: satisfy_prob(sparsity),
       can_disable: true,
       bias: random_normal(),
-      can_change_activation: true,
-      activation: rand_activation()
+      can_change_activation: false,
+      activation: relu
     )
 
     node_index[node.id] = nn.meta_nodes.len
@@ -1056,12 +1052,12 @@ proc mutate(
   add_remove_edge_prob: Prob = 0.05,
   add_remove_node_prob: Prob = 0.05,
   change_activation_prob: Prob = 0.01,
-  change_edge_weight_prob: Prob = 0.01,
-  replace_edge_weight_prob: Prob = 0.05,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
-  change_node_bias_prob: Prob = 0.01,
+  change_edge_weight_prob: Prob = 0.8,
+  replace_edge_weight_prob: Prob = 0.1,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
+  change_node_bias_prob: Prob = 0.15,
   decay_edge_weight_prob: Prob = 0.0,
   decay_node_bias_prob: Prob = 0.0,
-  grow_edge_prob: Prob = 1e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_edge_prob: Prob = 5e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1,
@@ -1106,7 +1102,9 @@ proc mutate(
     if node.id notin node_index:
       let new_meta_node = MetaNode(
         topology_id: top.id,
-        activation: rand_activation(),
+        node_id: node.id,
+        activation: relu,
+        can_change_activation: false,
         can_disable: false, # only inputs and outputs are locked
         disabled: true
       )
@@ -1164,7 +1162,7 @@ proc mutate(
 
       # add the two innovated edges, with the new node above in between
 
-      let edge = find_edge(top, meta_edge.edge_id)
+      let edge = top.edges[meta_edge.edge_id]
 
       let edge_id1 = add_edge(top, edge.from_node_id, node_id)
       let edge_id2 = add_edge(top, node_id, edge.to_node_id)
@@ -1174,7 +1172,8 @@ proc mutate(
       let meta_node = MetaNode(
         topology_id: top.id,
         node_id: node_id,
-        activation: rand_activation()
+        activation: relu,
+        can_change_activation: false,
       )
 
       let new_local_node_id = nn.meta_nodes.len
@@ -1217,6 +1216,7 @@ proc mutate(
     if edge.id notin edge_index:
       let new_meta_edge = MetaEdge(
         topology_id: top.id,
+        edge_id: edge.id,
         local_from_node_id: node_index[edge.from_node_id],
         local_to_node_id: node_index[edge.to_node_id],
         disabled: true
@@ -1410,7 +1410,7 @@ proc crossover(
     if (parent1_edge.disabled or parent2_edge.disabled):
       new_edge.disabled = satisfy_prob(prob_child_disabled_given_parent_cond)
 
-    let edge = find_edge(top, new_edge.edge_id)
+    let edge = top.edges[new_edge.edge_id]
 
     if (
       edge.from_node_id notin child_node_index or
@@ -1431,7 +1431,7 @@ proc crossover(
     let new_edge = MetaEdge()
     new_edge[] = disjoint_edge[]
 
-    let edge = find_edge(top, new_edge.edge_id)
+    let edge = top.edges[new_edge.edge_id]
 
     if (
       edge.from_node_id notin child_node_index or
