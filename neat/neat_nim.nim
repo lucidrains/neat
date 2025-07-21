@@ -676,6 +676,8 @@ proc evaluate_nn_exec_trace(
 
     var input_node_index_and_weight: seq[(float32, int)] = @[] # omit visited
 
+    shuffle(nn.meta_edges) # no constraints on acyclic graph, will eventually add cycles as an option, so it resembles reservoir
+
     for meta_edge in nn.meta_edges:
       if meta_edge.disabled:
         continue
@@ -830,6 +832,10 @@ proc evaluate_nn_exec_trace_thread_fn(
 ) {.gcsafe.} =
 
   let nn = top.population[nn_id]
+
+  if nn.cached_exec_trace.is_some:
+    return
+
   let trace = evaluate_nn_exec_trace(top, nn_id)
   nn.cached_exec_trace = trace.some
 
@@ -842,9 +848,9 @@ proc set_population_exec_trace(
     let nn = top.population[nn_id]
 
     # set the cached graph execution on neural network if not exists (it has been mutated)
+    spawn evaluate_nn_exec_trace_thread_fn(top, nn_id)
 
-    if nn.cached_exec_trace.is_none:
-      nn.cached_exec_trace = evaluate_nn_exec_trace(top.id, nn_id).some
+  Weave.sync_root()
 
 proc evaluate_population(
   top_id: int,
