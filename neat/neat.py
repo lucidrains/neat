@@ -14,8 +14,6 @@ from jax import (
 
 from jax.tree_util import tree_map
 
-from itertools import product
-
 import einx
 from einops import einsum
 
