@@ -816,14 +816,28 @@ proc evaluate_nn_single_with_trace_thread_fn(
   for i in 0 ..< num_inputs:
     inputs[i] = buffer_input[i]
 
-  let seq_inputs = inputs.map(input => @[input])
+  var (meta_info, trace) = trace[]
+  let (_, num_outputs, num_nodes) = meta_info
 
-  let seq_output = evaluate_nn_with_trace(trace[], seq_inputs)
+  var values = new_seq[float32](num_nodes)
 
-  let outputs = seq_output.map(output => output[0])
+  values &= inputs
 
-  for i in 0 ..< outputs.len:
-    buffer_output[i] = outputs[i]
+  for update_node in trace:
+    let (to_id, act_index, bias, incoming_weights) = update_node
+
+    values[to_id] = values[to_id] + bias
+
+    for incoming_weight in incoming_weights:
+      let (weight, from_id) = incoming_weight
+      values[to_id] += weight * values[from_id]
+
+    values[to_id] = Activation(act_index).activate(values[to_id])
+
+  # values is [inputs] [output] [hiddens] [init inputs]
+
+  for i in 0 ..< num_outputs:
+    buffer_output[i] = values[i + num_inputs]
 
 proc evaluate_nn_exec_trace_thread_fn(
   top: Topology,
