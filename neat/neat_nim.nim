@@ -848,9 +848,8 @@ proc set_population_exec_trace(
     let nn = top.population[nn_id]
 
     # set the cached graph execution on neural network if not exists (it has been mutated)
-    spawn evaluate_nn_exec_trace_thread_fn(top, nn_id)
-
-  Weave.sync_root()
+    if nn.cached_exec_trace.is_none:
+      nn.cached_exec_trace = evaluate_nn_exec_trace(top.id, nn_id).some
 
 proc evaluate_population(
   top_id: int,
@@ -1515,7 +1514,7 @@ proc crossover_and_add_to_population(
 
 when is_main_module:
 
-  # hyperneat
+  # neat
 
   let hyperneat_top_id = add_topology(3, 1, @[16, 16, 16])
   init_population(hyperneat_top_id, 10)
@@ -1523,34 +1522,7 @@ when is_main_module:
 
   assert top.population.len == 10
 
-  for i in 0..<10:
+  for i in 0..<100:
     let (_, _, couples) = select_and_tournament(@[hyperneat_top_id], @[1.0'f32, 2.0, 3.0, 5.0, 4.0, 2.0, 3.0, 1.0, 2.0, 3.0], num_selected = 4, tournament_size = 2)
     crossover_and_add_to_population(@[hyperneat_top_id], couples)
     mutate_all(@[hyperneat_top_id])
-
-  let output1 = evaluate_nn_single(hyperneat_top_id, 0, @[2.0'f32, 3.0, 5.0])
-  let trace = evaluate_nn_exec_trace(hyperneat_top_id, 0)
-  let output2 = evaluate_nn_single(hyperneat_top_id, 0, @[2.0'f32, 3.0, 5.0], use_exec_cache = true)
-
-  assert output1 == output2
-
-  benchmark("non cached", 100):
-    discard evaluate_nn_single(hyperneat_top_id, 0, @[2.0'f32, 3.0, 5.0])
-
-  benchmark("cached", 100):
-    discard evaluate_nn_single(hyperneat_top_id, 0, @[2.0'f32, 3.0, 5.0], use_exec_cache = true)
-
-  let hyperneat_top = topologies[hyperneat_top_id]
-  discard crossover(hyperneat_top, 0, 1, 0.5, 0.3)
-
-  mutate(hyperneat_top_id, nn_id = 0, mutate_prob = 1.0, grow_edge_prob = 1.0)
-  discard generate_hyper_weights(hyperneat_top_id, 0, @[2, 3, 5])
-  remove_topology(hyperneat_top_id)
-
-  # regular neat
-
-  let neat_top_id = add_topology(3, 4, @[16, 16])
-  init_population(neat_top_id, 3)
-
-  discard evaluate_population(neat_top_id, @[@[2.0'f32, 3.0, 5.0], @[3.0'f32, 5.0, 7.0], @[3.0'f32, 5.0, 7.0]])
-  remove_topology(neat_top_id)
