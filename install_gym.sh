@@ -12,7 +12,12 @@ nimble install
 
 # box2d
 
-apt install swig -y
+export OS_TYPE=$(uname -s)
+
+if [[ "$OS_TYPE" == "Linux" ]]; then
+  apt install swig -y
+elif [[ "$OS_TYPE" == "Darwin" ]]; then
+  brew install swig
 
 # uv
 
