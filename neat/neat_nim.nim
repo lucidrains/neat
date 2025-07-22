@@ -204,7 +204,6 @@ type
   Couples = seq[Couple]
 
   TopologyInfo = object
-    population_size: int
     total_innovated_nodes: int
     total_innovated_edges: int
 
@@ -221,7 +220,6 @@ proc get_topology_info(
 
   let top = topologies[top_id]
 
-  result.population_size = top.population.len
   result.total_innovated_nodes = top.node_innovation_id.load + 1
   result.total_innovated_edges = top.edge_innovation_id.load + 1
 

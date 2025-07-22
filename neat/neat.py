@@ -158,6 +158,9 @@ def mlp(
     return einsum(weight, t, '... i o, ... i -> ... o') + bias
 
 class GeneticAlgorithm:
+    def stats(self):
+        return [get_topology_info(top_id) for top_id in self.all_top_ids]
+
     def genetic_algorithm_step(
         self,
         fitnesses: Array,

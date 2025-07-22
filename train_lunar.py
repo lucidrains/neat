@@ -34,8 +34,9 @@ FRAC_NATURAL_SELECTED = 0.25
 TOURNAMENT_FRAC = 0.25
 NUM_ROLLOUTS_BEFORE_EVO = 1
 
-RUN_NAME = f'neat-{POP_SIZE}' if TEST_REGULAR_NEAT else f'hyperneat-{POP_SIZE}'
 WANDB_ONLINE = False # turn this on to pipe experiment to cloud
+
+RUN_NAME = f'neat-{POP_SIZE}' if TEST_REGULAR_NEAT else f'hyperneat-{POP_SIZE}'
 
 # experiment tracker
 
@@ -165,11 +166,6 @@ for gen in tqdm(range(NUM_GENERATIONS)):
 
     fitnesses = jnp.stack(all_fitnesses).mean(axis = 0)
 
-    wandb.log(dict(
-        max_fitness = fitnesses.max(),
-        mean_pop_fitness = fitnesses.mean()
-    ))
-
     # insilico evolution
 
     population.genetic_algorithm_step(
@@ -177,6 +173,18 @@ for gen in tqdm(range(NUM_GENERATIONS)):
         num_selected_frac = FRAC_NATURAL_SELECTED,
         tournament_frac = TOURNAMENT_FRAC
     )
+
+    # logging
+
+    log = dict(
+        max_fitness = fitnesses.max(),
+        mean_pop_fitness = fitnesses.mean(),
+    )
+
+    if TEST_REGULAR_NEAT:
+        log.update(population.stats()[0])
+
+    wandb.log(log)
 
     print(f'fitness: max {fitnesses.max():.2f} | mean {fitnesses.mean():.2f} | std {fitnesses.std():.2f}')
 
