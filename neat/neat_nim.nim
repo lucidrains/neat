@@ -862,22 +862,24 @@ proc evaluate_population(
 
   let output = new_seq_with(top.population.len, new_seq[float32](top.num_outputs))
 
-  for nn_id in 0 ..< inputs.len:
+  sync_scope():
 
-    let nn = top.population[nn_id]
+    for nn_id in 0 ..< inputs.len:
 
-    # input and output buffers for thread
+      let nn = top.population[nn_id]
 
-    let buffer_input = cast[ptr UncheckedArray[float32]](inputs[nn_id][0].addr)
-    let buffer_output = cast[ptr UncheckedArray[float32]](output[nn_id][0].addr)
+      # input and output buffers for thread
 
-    # spawn thread
+      let buffer_input = cast[ptr UncheckedArray[float32]](inputs[nn_id][0].addr)
+      let buffer_output = cast[ptr UncheckedArray[float32]](output[nn_id][0].addr)
 
-    spawn evaluate_nn_single_with_trace_thread_fn(
-      nn.cached_exec_trace.get.addr,
-      buffer_input,
-      buffer_output
-    )
+      # spawn thread
+
+      spawn evaluate_nn_single_with_trace_thread_fn(
+        nn.cached_exec_trace.get.addr,
+        buffer_input,
+        buffer_output
+      )
 
   Weave.sync_root()
 
@@ -1054,18 +1056,18 @@ proc mutate(
   top: Topology,
   nn_id: int,
   mutate_prob: Prob = 0.95,
-  add_novel_edge_prob: Prob = 5e-3,
+  add_novel_edge_prob: Prob = 5e-1,
   toggle_meta_edge_prob: Prob = 0.05,
-  add_remove_node_prob: Prob = 0.01,
+  add_remove_node_prob: Prob = 1e-5,
   change_activation_prob: Prob = 0.001,
   change_edge_weight_prob: Prob = 0.5,
   replace_edge_weight_prob: Prob = 0.1,    # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
   change_node_bias_prob: Prob = 0.1,
   replace_node_bias_prob: Prob = 0.1,
-  grow_edge_prob: Prob = 5e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_edge_prob: Prob = 5e-2,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
-  perturb_weight_strength: Prob = 5e-2,
-  perturb_bias_strength: Prob = 5e-2,
+  perturb_weight_strength: Prob = 0.1,
+  perturb_bias_strength: Prob = 0.1,
 ) {.gcsafe exportpy.} =
 
   let nn = top.population[nn_id]
@@ -1077,59 +1079,32 @@ proc mutate(
   var edge_index = init_table[int, int]()
 
   var global_conn_index = top.conn_index
-  var local_conn_index = init_table[(int, int), int]()
 
   # mutating nodes
 
   for local_node_id, meta_node in nn.meta_nodes:
     node_index[meta_node.node_id] = local_node_id
 
+    # toggling disable flag on meta node
+
+    if meta_node.can_disable and satisfy_prob(add_remove_node_prob):
+      meta_node.disabled = meta_node.disabled xor true
+  
+    if meta_node.disabled:
+      continue
+
     # mutating an activation on a node
 
     if meta_node.can_change_activation and satisfy_prob(change_activation_prob):
       meta_node.activation = rand_activation()
 
-    if meta_node.disabled:
-      continue
+    # mutating bias
 
     if satisfy_prob(change_node_bias_prob):
       if satisfy_prob(replace_node_bias_prob):
         meta_node.bias = random_normal()
       else:
         meta_node.bias += random_normal() * perturb_bias_strength
-
-  # add / remove node
-
-  for node in top.nodes:
-    # enabling / disabling an node
-
-    if not satisfy_prob(add_remove_node_prob):
-      continue
-
-    if node.id notin node_index:
-      let new_meta_node = MetaNode(
-        topology_id: top.id,
-        node_id: node.id,
-        activation: if coin_flip(): relu else: sigmoid,
-        can_change_activation: coin_flip(),
-        can_disable: true, # only inputs and outputs are locked
-        disabled: true
-      )
-
-      node_index[node.id] = nn.meta_nodes.len
-      nn.meta_nodes.add(new_meta_node)
-
-    let meta_node_id = node_index[node.id]
-    let meta_node = nn.meta_nodes[meta_node_id]
-
-    # add or removing an existing node, if valid (input and output nodes are preserved)
-
-    if not meta_node.can_disable:
-      continue
-
-    meta_node.disabled = meta_node.disabled xor true
-    if not meta_node.disabled:
-      meta_node.bias = random_normal()
 
   # mutating edges
 
@@ -1263,14 +1238,14 @@ proc mutate(
   top_id: int,
   nn_id: int,
   mutate_prob: Prob = 0.95,
-  add_novel_edge_prob: Prob = 5e-3,
-  toggle_meta_edge_prob: Prob = 0.05,
-  add_remove_node_prob: Prob = 0.01,
+  add_novel_edge_prob: Prob = 5e-2,
+  toggle_meta_edge_prob: Prob = 1e-4,
+  add_remove_node_prob: Prob = 1e-4,
   change_activation_prob: Prob = 0.01,
   change_edge_weight_prob: Prob = 0.8,
   replace_edge_weight_prob: Prob = 0.1,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
   change_node_bias_prob: Prob = 0.15,
-  grow_edge_prob: Prob = 5e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_edge_prob: Prob = 5e-3,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
   grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1,
@@ -1397,8 +1372,8 @@ proc crossover(
     let new_node = MetaNode()
     new_node[] = rand_node[]
 
-    if (parent1_node.disabled or parent2_node.disabled):
-      new_node.disabled = satisfy_prob(prob_child_disabled_given_parent_cond)
+    if (parent1_node.disabled or parent2_node.disabled) and satisfy_prob(prob_child_disabled_given_parent_cond):
+      continue
 
     child_node_index[new_node.node_id] = child_nodes.len
     child_nodes.add(new_node)
@@ -1430,8 +1405,8 @@ proc crossover(
     let new_edge = MetaEdge()
     new_edge[] = rand_edge[]
 
-    if (parent1_edge.disabled or parent2_edge.disabled):
-      new_edge.disabled = satisfy_prob(prob_child_disabled_given_parent_cond)
+    if (parent1_edge.disabled or parent2_edge.disabled) and satisfy_prob(prob_child_disabled_given_parent_cond):
+      continue
 
     let edge = top.edges[new_edge.edge_id]
 

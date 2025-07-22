@@ -323,7 +323,6 @@ class NEAT(GeneticAlgorithm):
         state: Array,
         sample = False,
         temperature = 1.,
-        n_jobs = -1,
     ):
         logits = evaluate_population(self.top.id, state.tolist())
 
