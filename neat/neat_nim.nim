@@ -1056,7 +1056,7 @@ proc mutate(
   top: Topology,
   nn_id: int,
   mutate_prob: Prob = 0.95,
-  add_novel_edge_prob: Prob = 5e-1,
+  add_novel_edge_prob: Prob = 5e-2,
   toggle_meta_edge_prob: Prob = 0.05,
   add_remove_node_prob: Prob = 1e-5,
   change_activation_prob: Prob = 0.001,
@@ -1064,8 +1064,8 @@ proc mutate(
   replace_edge_weight_prob: Prob = 0.1,    # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
   change_node_bias_prob: Prob = 0.1,
   replace_node_bias_prob: Prob = 0.1,
-  grow_edge_prob: Prob = 5e-2,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
-  grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
+  grow_edge_prob: Prob = 5e-3,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+  grow_node_prob: Prob = 1e-3,             # similarly, some follow up research do a variation of the above and split an existing node into two nodes, in theory this leads to the network modularization
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1,
 ) {.gcsafe exportpy.} =
@@ -1080,11 +1080,86 @@ proc mutate(
 
   var global_conn_index = top.conn_index
 
-  # mutating nodes
+  # indexing global to local
 
   for local_node_id, meta_node in nn.meta_nodes:
     node_index[meta_node.node_id] = local_node_id
 
+  for local_edge_id, meta_edge in nn.meta_edges:
+    edge_index[meta_edge.edge_id] = local_edge_id
+
+  let meta_nodes_len = nn.meta_nodes.len
+  let meta_edges_len = nn.meta_edges.len
+
+  # mutating nodes
+
+  for local_node_id in 0 ..< meta_nodes_len:
+
+    let meta_node = nn.meta_nodes[local_node_id]
+
+    # maybe grow a new module
+
+    if satisfy_prob(grow_node_prob):
+      let meta_node_global_id = meta_node.node_id
+
+      # create the new node
+
+      let new_node_id = add_node(top)
+
+      let new_meta_node = MetaNode(
+        topology_id: top.id,
+        node_id: new_node_id,
+        can_disable: true,
+        disabled: false,
+        activation: if coin_flip(): relu else: sigmoid,
+        can_change_activation: coin_flip(),
+      )
+
+      let new_local_node_id = nn.meta_nodes.len
+
+      node_index[new_node_id] = new_local_node_id
+      nn.meta_nodes.add(new_meta_node)
+
+      # connections, afferent and efferent
+
+      var new_edge_ids: seq[int] = @[]
+
+      for node_from_to_id, edge_id in global_conn_index.pairs:
+        let (from_node_id, to_node_id) = node_from_to_id
+
+        # only if this individual has the prerequisite afferent and efferent neurons
+        # innovate the new edges for the module
+
+        if not (
+          node_index.has_key(from_node_id) and
+          node_index.has_key(to_node_id) and
+          edge_index.has_key(edge_id)
+        ):
+          continue
+
+        if nn.meta_edges[edge_index[edge_id]].disabled:
+          continue
+
+        if to_node_id == meta_node_global_id:
+          new_edge_ids.add(add_edge(top, from_node_id, new_node_id))
+        elif from_node_id == meta_node_global_id:
+          new_edge_ids.add(add_edge(top, new_node_id, to_node_id))
+
+      # add the meta edges
+
+      for new_edge_id in new_edge_ids:
+        let edge = top.edges[new_edge_id]
+
+        let new_meta_edge = MetaEdge(
+          topology_id: top.id,
+          edge_id: new_edge_id,
+          local_from_node_id: node_index[edge.from_node_id],
+          local_to_node_id: node_index[edge.to_node_id],
+          weight: random_normal()
+        )
+
+        nn.meta_edges.add(new_meta_edge)
+      
     # toggling disable flag on meta node
 
     if meta_node.can_disable and satisfy_prob(add_remove_node_prob):
@@ -1108,11 +1183,9 @@ proc mutate(
 
   # mutating edges
 
-  for meta_edge_index in 0..<nn.meta_edges.len:
+  for meta_edge_index in 0 ..< meta_edges_len:
 
     let meta_edge = nn.meta_edges[meta_edge_index]
-
-    edge_index[meta_edge.edge_id] = meta_edge_index
 
     # changing a weight
 
@@ -1246,7 +1319,7 @@ proc mutate(
   replace_edge_weight_prob: Prob = 0.1,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
   change_node_bias_prob: Prob = 0.15,
   grow_edge_prob: Prob = 5e-3,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
-  grow_node_prob: Prob = 0.0,              # similarly, some follow up research do a variation of the above and split an existing node into two nodes
+  grow_node_prob: Prob = 1e-3,             # similarly, some follow up research do a variation of the above and split an existing node into two nodes, in theory this leads to the network modularization
   perturb_weight_strength: Prob = 0.1,
   perturb_bias_strength: Prob = 0.1,
 ) {.exportpy.} =

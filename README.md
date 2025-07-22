@@ -49,6 +49,29 @@ $ pip install '.[gym]' && python train_lunar.py
 ```
 
 ```bibtex
+@article{Hornby2006AutomatedAD,
+    title   = {Automated Antenna Design with Evolutionary Algorithms},
+    author  = {Gregory Hornby and Al Globus and Derek S. Linden and Jason D. Lohn},
+    journal = {Space},
+    year    = {2006},
+    url     = {https://api.semanticscholar.org/CorpusID:8290212}
+}
+```
+
+```bibtex
+@inproceedings{schrum:gecco14,
+    title   = {Evolving Multimodal Behavior With Modular Neural Networks in Ms. Pac-Man},
+    author  = {Jacob Schrum and Risto Miikkulainen},
+    booktitle = {Proceedings of the Genetic and Evolutionary Computation Conference (GECCO 2014)},
+    month   = {July},
+    address = {Vancouver, BC, Canada},
+    pages   = {325--332},
+    note    = {Best Paper: Digital Entertainment and Arts},
+    url     = {http://www.cs.utexas.edu/users/ai-lab?schrum:gecco2014},
+    year    = {2014}
+```
+
+```bibtex
 @article{stanley:ec02,
     title   = {Evolving Neural Networks Through Augmenting Topologies},
     author  = {Kenneth O. Stanley and Risto Miikkulainen},
@@ -58,15 +81,5 @@ $ pip install '.[gym]' && python train_lunar.py
     pages   = {99-127},
     url     = "http://nn.cs.utexas.edu/?stanley:ec02",
     year    = {2002}
-}
-```
-
-```bibtex
-@article{Hornby2006AutomatedAD,
-    title   = {Automated Antenna Design with Evolutionary Algorithms},
-    author  = {Gregory Hornby and Al Globus and Derek S. Linden and Jason D. Lohn},
-    journal = {Space},
-    year    = {2006},
-    url     = {https://api.semanticscholar.org/CorpusID:8290212}
 }
 ```
