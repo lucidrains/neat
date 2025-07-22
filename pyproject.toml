@@ -29,6 +29,7 @@ dependencies = [
     "jaxlib",
     "jaxtyping",
     "nimporter",
+    "setuptools"
 ]
 
 [project.urls]
@@ -49,6 +50,7 @@ gym = [
     "numpy>=2.2.5",
     "swig",
     "tqdm",
+    "wandb[media]"
 ]
 
 [tool.pytest.ini_options]

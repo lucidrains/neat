@@ -6,6 +6,8 @@ import jax.numpy as jnp
 
 from neat.neat import HyperNEAT, NEAT
 
+import wandb
+
 # helpers
 
 def exists(v):
@@ -21,7 +23,7 @@ def divisible_by(num, den):
 
 NUM_GENERATIONS = 1000
 
-TEST_REGULAR_NEAT = False
+TEST_REGULAR_NEAT = True
 POP_SIZE = 100
 NUM_CPPN_HIDDEN_NODES = 16
 NUM_HIDDEN_LAYERS = 0
@@ -31,6 +33,14 @@ MAX_EPISODE_LEN = 250
 FRAC_NATURAL_SELECTED = 0.25
 TOURNAMENT_FRAC = 0.25
 NUM_ROLLOUTS_BEFORE_EVO = 1
+
+RUN_NAME = f'neat-{POP_SIZE}' if TEST_REGULAR_NEAT else f'hyperneat-{POP_SIZE}'
+WANDB_ONLINE = False # turn this on to pipe experiment to cloud
+
+# experiment tracker
+
+wandb.init(project = 'lunar-neat', mode = 'disabled' if not WANDB_ONLINE else 'online')
+wandb.run.name = RUN_NAME
 
 # environment
 
@@ -61,6 +71,8 @@ env = gym.wrappers.RecordVideo(
     disable_logger = True
 )
 
+num_recorded = 0
+
 def record_agent_(
     policy_index,
     seed = None
@@ -71,7 +83,7 @@ def record_agent_(
     while True:
         actions_to_env = population.single_forward(policy_index, state, sample = True)
 
-        next_state, reward, truncated, terminated, *_ = env.step(actions_to_env)
+        next_state, _, truncated, terminated, *_ = env.step(actions_to_env)
 
         state = next_state
 
@@ -79,6 +91,12 @@ def record_agent_(
             break
 
     env.close()
+
+    video = wandb.Video(f'./recordings/lunar-video-episode-{num_recorded}.mp4', format = 'gif')
+
+    wandb.log(dict(
+        fittest_rollout = video
+    ))
 
 # population policies
 
@@ -147,6 +165,11 @@ for gen in tqdm(range(NUM_GENERATIONS)):
 
     fitnesses = jnp.stack(all_fitnesses).mean(axis = 0)
 
+    wandb.log(dict(
+        max_fitness = fitnesses.max(),
+        mean_pop_fitness = fitnesses.mean()
+    ))
+
     # insilico evolution
 
     population.genetic_algorithm_step(
@@ -155,5 +178,9 @@ for gen in tqdm(range(NUM_GENERATIONS)):
         tournament_frac = TOURNAMENT_FRAC
     )
 
+    print(f'fitness: max {fitnesses.max():.2f} | mean {fitnesses.mean():.2f} | std {fitnesses.std():.2f}')
+
     if divisible_by(gen + 1, RECORD_EVERY):
         record_agent_(0)
+        num_recorded += 1
+

@@ -164,7 +164,7 @@ class GeneticAlgorithm:
         num_selected = None,
         num_selected_frac = None,
         tournament_frac = 0.25,
-        num_preserve_elites_frac = 0.0,
+        num_preserve_elites_frac = 0.,
     ):
 
         assert exists(num_selected) ^ exists(num_selected_frac)
@@ -180,8 +180,6 @@ class GeneticAlgorithm:
 
         num_preserve_elites = int(num_preserve_elites_frac * num_selected)
         assert num_preserve_elites < num_selected
-
-        print(f'fitness: max {fitnesses.max():.2f} | mean {fitnesses.mean():.2f} | std {fitnesses.std():.2f}')
 
         tournament_size = max(2, int(tournament_frac * num_selected))
 
