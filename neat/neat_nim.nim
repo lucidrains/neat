@@ -1095,6 +1095,9 @@ proc mutate(
 
     let meta_node = nn.meta_nodes[local_node_id]
 
+    if meta_node.disabled:
+      continue
+
     # maybe grow a new module
 
     if satisfy_prob(grow_node_prob):
@@ -1162,9 +1165,6 @@ proc mutate(
 
     if meta_node.can_disable and satisfy_prob(add_remove_node_prob):
       meta_node.disabled = meta_node.disabled xor true
-  
-    if meta_node.disabled:
-      continue
 
     # mutating an activation on a node
 
@@ -1345,6 +1345,7 @@ proc crossover(
   first_parent_fitness: float32,
   second_parent_fitness: float32,
   prob_child_disabled_given_parent_cond: float32 = 0.75,
+  prob_remove_disabled_node: float32 = 0.01,
   prob_inherit_all_excess_genes: float32 = 1.0
 ): NeuralNetwork {.exportpy.} =
 
@@ -1443,7 +1444,12 @@ proc crossover(
     let new_node = MetaNode()
     new_node[] = rand_node[]
 
-    if (parent1_node.disabled or parent2_node.disabled) and satisfy_prob(prob_child_disabled_given_parent_cond):
+    if (parent1_node.disabled or parent2_node.disabled):
+      new_node.disabled = satisfy_prob(prob_child_disabled_given_parent_cond)
+
+    # some of the time, do not inherit disabled genes
+
+    if satisfy_prob(prob_remove_disabled_node) and new_node.disabled:
       continue
 
     child_node_index[new_node.node_id] = child_nodes.len
@@ -1476,8 +1482,8 @@ proc crossover(
     let new_edge = MetaEdge()
     new_edge[] = rand_edge[]
 
-    if (parent1_edge.disabled or parent2_edge.disabled) and satisfy_prob(prob_child_disabled_given_parent_cond):
-      continue
+    if (parent1_edge.disabled or parent2_edge.disabled):
+      new_edge.disabled = satisfy_prob(prob_child_disabled_given_parent_cond)
 
     let edge = top.edges[new_edge.edge_id]
 
