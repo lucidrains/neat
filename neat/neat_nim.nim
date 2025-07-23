@@ -13,7 +13,6 @@ import std/[
   tables,
   sugar,
   segfaults,
-  atomics,
   algorithm
 ]
 
@@ -290,7 +289,7 @@ type
 # globals
 
 var topologies = init_table[int, Topology]()
-var topology_id: Atomic[int]
+var topology_id: int
 
 # helper accessors
 
@@ -343,7 +342,7 @@ proc add_topology(
 ): int {.exportpy.} =
 
   let topology = Topology(
-    id: topology_id.fetch_add(1),
+    id: topology_id,
     num_inputs: num_inputs,
     num_outputs: num_outputs,
     num_hiddens: num_hiddens,
@@ -351,6 +350,8 @@ proc add_topology(
     crossover_hyper_params: crossover_hyper_params,
     selection_hyper_params: selection_hyper_params
   )
+
+  topology_id += 1
 
   topology.nodes_index = init_table[int, Node]()
   topology.edges_index = init_table[int, Edge]()
