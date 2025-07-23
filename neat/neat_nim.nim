@@ -26,6 +26,8 @@ import bitvector
 
 import arraymancer
 
+import jsony
+
 import malebolgia
 
 type
@@ -208,6 +210,21 @@ type
     meta_edges: seq[MetaEdge] = @[]
     cached_exec_trace: Option[ExecTrace]
 
+  MutationHyperParams = object
+    mutate_prob: float = 0.95
+    add_novel_edge_prob: float = 5e-3
+    toggle_meta_edge_prob: float = 0.05
+    add_remove_node_prob: float = 1e-5
+    change_activation_prob: float = 0.001
+    change_edge_weight_prob: float = 0.5
+    replace_edge_weight_prob: float = 0.1    # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
+    change_node_bias_prob: float = 0.1
+    replace_node_bias_prob: float = 0.1
+    grow_edge_prob: float = 5e-4             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+    grow_node_prob: float = 1e-5             # similarly, some follow up research do a variation of the above and split an existing node into two nodes, in theory this leads to the network modularization
+    perturb_weight_strength: float = 0.1
+    perturb_bias_strength: float = 0.1
+
   Topology = ref object
     id: int
 
@@ -229,6 +246,10 @@ type
     pop_size: int = 0
     curr_pop_size: int = 0
     population: seq[NeuralNetwork] = @[]
+
+    # default hyperparams
+
+    mutation_hyper_params: MutationHyperParams
 
   # crossover related
 
@@ -278,14 +299,16 @@ proc rand_activation(): Activation
 proc add_topology(
   num_inputs: int,
   num_outputs: int,
-  num_hiddens: seq[int]
+  num_hiddens: seq[int],
+  mutation_hyper_params: MutationHyperParams = MutationHyperParams()
 ): int {.exportpy.} =
 
   let topology = Topology(
     id: topology_id.fetch_add(1),
     num_inputs: num_inputs,
     num_outputs: num_outputs,
-    num_hiddens: num_hiddens
+    num_hiddens: num_hiddens,
+    mutation_hyper_params: mutation_hyper_params
   )
 
   topology.nodes_index = init_table[int, Node]()
@@ -854,19 +877,6 @@ proc evaluate_nn_single_with_trace_thread_fn(
   for i in 0 ..< num_outputs:
     buffer_output[i] = values[i + num_inputs]
 
-proc evaluate_nn_exec_trace_thread_fn(
-  top: Topology,
-  nn_id: int
-) {.gcsafe.} =
-
-  let nn = top.population[nn_id]
-
-  if nn.cached_exec_trace.is_some:
-    return
-
-  let trace = evaluate_nn_exec_trace(top, nn_id)
-  nn.cached_exec_trace = trace.some
-
 proc set_population_exec_trace(
   top_id: int
 ) =
@@ -1091,24 +1101,13 @@ proc select_and_tournament(
 proc mutate(
   top: Topology,
   nn_id: int,
-  mutate_prob: Prob = 0.95,
-  add_novel_edge_prob: Prob = 5e-3,
-  toggle_meta_edge_prob: Prob = 0.05,
-  add_remove_node_prob: Prob = 1e-5,
-  change_activation_prob: Prob = 0.001,
-  change_edge_weight_prob: Prob = 0.5,
-  replace_edge_weight_prob: Prob = 0.1,    # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
-  change_node_bias_prob: Prob = 0.1,
-  replace_node_bias_prob: Prob = 0.1,
-  grow_edge_prob: Prob = 5e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
-  grow_node_prob: Prob = 1e-5,             # similarly, some follow up research do a variation of the above and split an existing node into two nodes, in theory this leads to the network modularization
-  perturb_weight_strength: Prob = 0.1,
-  perturb_bias_strength: Prob = 0.1,
+  mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none
 ) {.gcsafe exportpy.} =
+  let hparams = mutation_hyper_params.get(top.mutation_hyper_params)
 
   let nn = top.population[nn_id]
 
-  if not satisfy_prob(mutate_prob):
+  if not satisfy_prob(hparams.mutate_prob):
     return
 
   var node_index = init_table[int, int]()
@@ -1138,7 +1137,7 @@ proc mutate(
 
     # maybe grow a new module
 
-    if satisfy_prob(grow_node_prob):
+    if satisfy_prob(hparams.grow_node_prob):
       let meta_node_global_id = meta_node.node_id
 
       # create the new node
@@ -1201,21 +1200,21 @@ proc mutate(
       
     # toggling disable flag on meta node
 
-    if meta_node.can_disable and satisfy_prob(add_remove_node_prob):
+    if meta_node.can_disable and satisfy_prob(hparams.add_remove_node_prob):
       meta_node.disabled = meta_node.disabled xor true
 
     # mutating an activation on a node
 
-    if meta_node.can_change_activation and satisfy_prob(change_activation_prob):
+    if meta_node.can_change_activation and satisfy_prob(hparams.change_activation_prob):
       meta_node.activation = rand_activation()
 
     # mutating bias
 
-    if satisfy_prob(change_node_bias_prob):
-      if satisfy_prob(replace_node_bias_prob):
+    if satisfy_prob(hparams.change_node_bias_prob):
+      if satisfy_prob(hparams.replace_node_bias_prob):
         meta_node.bias = random_normal()
       else:
-        meta_node.bias += random_normal() * perturb_bias_strength
+        meta_node.bias += random_normal() * hparams.perturb_bias_strength
 
   # mutating edges
 
@@ -1228,17 +1227,17 @@ proc mutate(
     if meta_edge.disabled:
       continue
 
-    if satisfy_prob(change_edge_weight_prob):
+    if satisfy_prob(hparams.change_edge_weight_prob):
 
-      if satisfy_prob(replace_edge_weight_prob):
+      if satisfy_prob(hparams.replace_edge_weight_prob):
         meta_edge.weight = random_normal()
       else:
-        meta_edge.weight += random_normal() * perturb_weight_strength
+        meta_edge.weight += random_normal() * hparams.perturb_weight_strength
 
     # maybe splitting an edge
     # this is the novel mutation introduced in the original NEAT paper
 
-    if satisfy_prob(grow_edge_prob):
+    if satisfy_prob(hparams.grow_edge_prob):
 
       # disable the edge
 
@@ -1289,7 +1288,7 @@ proc mutate(
 
     # toggling an existing edge gene in the individual
 
-    if not (satisfy_prob(toggle_meta_edge_prob) and meta_edge.can_disable):
+    if not (satisfy_prob(hparams.toggle_meta_edge_prob) and meta_edge.can_disable):
       continue
 
     meta_edge.disabled = meta_edge.disabled xor true
@@ -1298,7 +1297,7 @@ proc mutate(
 
   # adding of a novel edge to the gene pool + the individual
 
-  if satisfy_prob(add_novel_edge_prob):
+  if satisfy_prob(hparams.add_novel_edge_prob):
     let existing_node_ids = node_index.keys
       .to_seq
       .filter(node_id => not nn.meta_nodes[node_index[node_id]].disabled)
@@ -1346,25 +1345,15 @@ proc mutate(
 proc mutate(
   top_id: int,
   nn_id: int,
-  mutate_prob: Prob = 0.95,
-  add_novel_edge_prob: Prob = 5e-3,
-  toggle_meta_edge_prob: Prob = 1e-4,
-  add_remove_node_prob: Prob = 1e-3,
-  change_activation_prob: Prob = 0.05,
-  change_edge_weight_prob: Prob = 0.8,
-  replace_edge_weight_prob: Prob = 0.1,   # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
-  change_node_bias_prob: Prob = 0.15,
-  grow_edge_prob: Prob = 5e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
-  grow_node_prob: Prob = 1e-4,             # similarly, some follow up research do a variation of the above and split an existing node into two nodes, in theory this leads to the network modularization
-  perturb_weight_strength: Prob = 0.1,
-  perturb_bias_strength: Prob = 0.1,
+  mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none
 ) {.exportpy.} =
   let top = topologies[top_id]
-  mutate(top, nn_id)
+  mutate(top, nn_id, mutation_hyper_params)
 
 proc mutate_all(
   all_top_ids: seq[int],
-  num_preserve_elites: int = 0
+  num_preserve_elites: int = 0,
+  mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none
 ) {.exportpy.} =
 
   for top_id in all_top_ids:
@@ -1372,7 +1361,7 @@ proc mutate_all(
     assert num_preserve_elites < top.population.len
 
     for nn_id in num_preserve_elites ..< top.population.len:
-      mutate(top, nn_id)
+      mutate(top, nn_id, mutation_hyper_params)
 
     set_population_exec_trace(top_id)
 
@@ -1618,7 +1607,7 @@ when is_main_module:
 
   assert top.population.len == 10
 
-  for i in 0..<100:
-    let (_, _, couples) = select_and_tournament(@[hyperneat_top_id], @[1.0'f32, 2.0, 3.0, 5.0, 4.0, 2.0, 3.0, 1.0, 2.0, 3.0], num_selected = 4, tournament_size = 2)
-    crossover_and_add_to_population(@[hyperneat_top_id], couples)
-    mutate_all(@[hyperneat_top_id])
+  # for i in 0..<100:
+  #   let (_, _, couples) = select_and_tournament(@[hyperneat_top_id], @[1.0'f32, 2.0, 3.0, 5.0, 4.0, 2.0, 3.0, 1.0, 2.0, 3.0], num_selected = 4, tournament_size = 2)
+  #   crossover_and_add_to_population(@[hyperneat_top_id], couples)
+  #   mutate_all(@[hyperneat_top_id])

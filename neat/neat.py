@@ -1,11 +1,12 @@
 from __future__ import annotations
+
+import json
 from random import randrange
 from contextlib import contextmanager
 
 import numpy as np
 from jax import (
     numpy as jnp,
-    vmap,
     random,
     jit,
     nn,
@@ -14,7 +15,6 @@ from jax import (
 
 from jax.tree_util import tree_map
 
-import einx
 from einops import einsum
 
 import nimporter
@@ -69,12 +69,13 @@ class Topology:
         num_outputs,
         pop_size,
         num_hiddens = 32,
-        shape: tuple[int, ...] | None = None
+        shape: tuple[int, ...] | None = None,
+        mutation_hyper_params = None
     ):
         if isinstance(num_hiddens, int):
             num_hiddens = (num_hiddens,)
 
-        self.id = add_topology(num_inputs, num_outputs, num_hiddens)
+        self.id = add_topology(num_inputs, num_outputs, num_hiddens, mutation_hyper_params)
 
         self.init_population(pop_size)
 
@@ -197,6 +198,7 @@ class HyperNEAT(GeneticAlgorithm):
         pop_size,
         num_hiddens = 0,
         weight_norm = True,
+        mutation_hyper_params = None
     ):
 
         self.dims = dims
@@ -212,8 +214,8 @@ class HyperNEAT(GeneticAlgorithm):
             weight_shape = (dim_in, dim_out)
             bias_shape = (dim_out,)
 
-            hyper_weights_nn.append(Topology(2, 1, pop_size, num_hiddens = num_hiddens, shape = weight_shape))
-            hyper_biases_nn.append(Topology(1, 1, pop_size, num_hiddens = num_hiddens, shape = bias_shape))
+            hyper_weights_nn.append(Topology(2, 1, pop_size, num_hiddens = num_hiddens, shape = weight_shape, mutation_hyper_params = mutation_hyper_params))
+            hyper_biases_nn.append(Topology(1, 1, pop_size, num_hiddens = num_hiddens, shape = bias_shape, mutation_hyper_params = mutation_hyper_params))
 
         self.hyper_weights_nn = hyper_weights_nn
         self.hyper_biases_nn = hyper_biases_nn
@@ -278,6 +280,7 @@ class NEAT(GeneticAlgorithm):
         self,
         *dims,
         pop_size,
+        mutation_hyper_params = None
     ):
         self.dims = dims
         assert len(dims) >= 2
@@ -290,7 +293,7 @@ class NEAT(GeneticAlgorithm):
         self.dim_out = dim_out
         self.output = np.empty((pop_size, self.dim_out), dtype = np.float32)
 
-        self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size)
+        self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size, mutation_hyper_params = mutation_hyper_params)
         self.all_top_ids = [self.top.id]
 
     def single_forward(

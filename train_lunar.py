@@ -21,10 +21,10 @@ def divisible_by(num, den):
 
 # constants
 
-NUM_GENERATIONS = 1000
+NUM_GENERATIONS = 2000
 
 TEST_REGULAR_NEAT = True
-POP_SIZE = 500
+POP_SIZE = 100
 NUM_CPPN_HIDDEN_NODES = 16
 NUM_HIDDEN_LAYERS = 0
 
@@ -37,6 +37,22 @@ NUM_ROLLOUTS_BEFORE_EVO = 1
 WANDB_ONLINE = False # turn this on to pipe experiment to cloud
 
 RUN_NAME = f'neat-{POP_SIZE}' if TEST_REGULAR_NEAT else f'hyperneat-{POP_SIZE}'
+
+MUTATION_HYPER_PARAMS = dict(
+    mutate_prob = 0.95,
+    add_novel_edge_prob = 5e-3,
+    toggle_meta_edge_prob = 0.05,
+    add_remove_node_prob = 1e-5,
+    change_activation_prob = 0.001,
+    change_edge_weight_prob = 0.5,
+    replace_edge_weight_prob = 0.1,    # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
+    change_node_bias_prob = 0.1,
+    replace_node_bias_prob = 0.1,
+    grow_edge_prob = 5e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+    grow_node_prob = 1e-5,             # similarly, some follow up research do a variation of the above and split an existing node into two nodes, in theory this leads to the network modularization
+    perturb_weight_strength = 0.1,
+    perturb_bias_strength = 0.1
+)
 
 # experiment tracker
 
@@ -107,14 +123,16 @@ num_actions = 4
 if TEST_REGULAR_NEAT:
     population = NEAT(
         dim_state, *((NUM_CPPN_HIDDEN_NODES,) * NUM_HIDDEN_LAYERS), num_actions,
-        pop_size = POP_SIZE
+        pop_size = POP_SIZE,
+        mutation_hyper_params = MUTATION_HYPER_PARAMS
     )
 else:
     population = HyperNEAT(
         dim_state, 16, 16, num_actions,
 
         num_hiddens = (NUM_CPPN_HIDDEN_NODES,) * NUM_HIDDEN_LAYERS,
-        pop_size = POP_SIZE
+        pop_size = POP_SIZE,
+        mutation_hyper_params = MUTATION_HYPER_PARAMS
     )
 
 # interact with environment across generations
