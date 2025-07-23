@@ -54,6 +54,12 @@ MUTATION_HYPER_PARAMS = dict(
     perturb_bias_strength = 0.1
 )
 
+CROSSOVER_HYPER_PARAMS = dict(
+    prob_child_disabled_given_parent_cond = 0.75,
+    prob_remove_disabled_node = 0.01,
+    prob_inherit_all_excess_genes = 1.0
+)
+
 # experiment tracker
 
 wandb.init(project = 'lunar-neat', mode = 'disabled' if not WANDB_ONLINE else 'online')
@@ -124,15 +130,16 @@ if TEST_REGULAR_NEAT:
     population = NEAT(
         dim_state, *((NUM_CPPN_HIDDEN_NODES,) * NUM_HIDDEN_LAYERS), num_actions,
         pop_size = POP_SIZE,
-        mutation_hyper_params = MUTATION_HYPER_PARAMS
+        mutation_hyper_params = MUTATION_HYPER_PARAMS,
+        crossover_hyper_params = CROSSOVER_HYPER_PARAMS
     )
 else:
     population = HyperNEAT(
         dim_state, 16, 16, num_actions,
-
         num_hiddens = (NUM_CPPN_HIDDEN_NODES,) * NUM_HIDDEN_LAYERS,
         pop_size = POP_SIZE,
-        mutation_hyper_params = MUTATION_HYPER_PARAMS
+        mutation_hyper_params = MUTATION_HYPER_PARAMS,
+        crossover_hyper_params = CROSSOVER_HYPER_PARAMS
     )
 
 # interact with environment across generations

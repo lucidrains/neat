@@ -225,6 +225,11 @@ type
     perturb_weight_strength: float = 0.1
     perturb_bias_strength: float = 0.1
 
+  CrossoverHyperParams = object
+    prob_child_disabled_given_parent_cond: float = 0.75
+    prob_remove_disabled_node: float = 0.01
+    prob_inherit_all_excess_genes: float = 1.0
+
   Topology = ref object
     id: int
 
@@ -250,6 +255,8 @@ type
     # default hyperparams
 
     mutation_hyper_params: MutationHyperParams
+
+    crossover_hyper_params: CrossoverHyperParams
 
   # crossover related
 
@@ -300,7 +307,8 @@ proc add_topology(
   num_inputs: int,
   num_outputs: int,
   num_hiddens: seq[int],
-  mutation_hyper_params: MutationHyperParams = MutationHyperParams()
+  mutation_hyper_params: MutationHyperParams = MutationHyperParams(),
+  crossover_hyper_params: CrossoverHyperParams = CrossoverHyperParams()
 ): int {.exportpy.} =
 
   let topology = Topology(
@@ -308,7 +316,8 @@ proc add_topology(
     num_inputs: num_inputs,
     num_outputs: num_outputs,
     num_hiddens: num_hiddens,
-    mutation_hyper_params: mutation_hyper_params
+    mutation_hyper_params: mutation_hyper_params,
+    crossover_hyper_params: crossover_hyper_params
   )
 
   topology.nodes_index = init_table[int, Node]()
@@ -1371,10 +1380,10 @@ proc crossover(
   second_parent_nn_id: int,
   first_parent_fitness: float32,
   second_parent_fitness: float32,
-  prob_child_disabled_given_parent_cond: float32 = 0.75,
-  prob_remove_disabled_node: float32 = 0.01,
-  prob_inherit_all_excess_genes: float32 = 1.0
+  crossover_hyper_params: Option[CrossoverHyperParams] = CrossoverHyperParams.none
 ): NeuralNetwork {.exportpy.} =
+
+  let hyper_params = crossover_hyper_params.get(top.crossover_hyper_params)
 
   # parents
 
@@ -1433,7 +1442,7 @@ proc crossover(
     disjoint_node_ids: seq[int] = @[]
     disjoint_edge_ids: seq[int] = @[]
 
-  if satisfy_prob(prob_inherit_all_excess_genes):
+  if satisfy_prob(hyper_params.prob_inherit_all_excess_genes):
 
     # add a little noise for randomly tie-breaking parent one and two when scores are identical
 
@@ -1472,11 +1481,11 @@ proc crossover(
     new_node[] = rand_node[]
 
     if (parent1_node.disabled or parent2_node.disabled):
-      new_node.disabled = satisfy_prob(prob_child_disabled_given_parent_cond)
+      new_node.disabled = satisfy_prob(hyper_params.prob_child_disabled_given_parent_cond)
 
     # some of the time, do not inherit disabled genes
 
-    if satisfy_prob(prob_remove_disabled_node) and new_node.disabled:
+    if satisfy_prob(hyper_params.prob_remove_disabled_node) and new_node.disabled:
       continue
 
     child_node_index[new_node.node_id] = child_nodes.len
@@ -1510,7 +1519,7 @@ proc crossover(
     new_edge[] = rand_edge[]
 
     if (parent1_edge.disabled or parent2_edge.disabled):
-      new_edge.disabled = satisfy_prob(prob_child_disabled_given_parent_cond)
+      new_edge.disabled = satisfy_prob(hyper_params.prob_child_disabled_given_parent_cond)
 
     let edge = top.edges[new_edge.edge_id]
 
@@ -1562,6 +1571,7 @@ proc crossover_one_couple_and_add_to_population(
   top: Topology,
   nn_id: int,
   couple: Couple,
+  crossover_hyper_params: Option[CrossoverHyperParams] = CrossoverHyperParams.none
 ) {.exportpy.} =
 
   let (parent1_info, parent2_info) = couple
@@ -1569,7 +1579,7 @@ proc crossover_one_couple_and_add_to_population(
   let (parent1, fitness1) = parent1_info
   let (parent2, fitness2) = parent2_info
 
-  let child = crossover(top, parent1, parent2, fitness1, fitness2)
+  let child = crossover(top, parent1, parent2, fitness1, fitness2, crossover_hyper_params)
 
   top.population[nn_id] = child
 
@@ -1577,13 +1587,15 @@ proc crossover_one_couple_and_add_to_population(
   top_id: int,
   nn_id: int,
   couple: Couple,
+  crossover_hyper_params: Option[CrossoverHyperParams] = CrossoverHyperParams.none
 ) {.exportpy.} =
   let top = topologies[top_id]
-  crossover_one_couple_and_add_to_population(top, nn_id, couple)
+  crossover_one_couple_and_add_to_population(top, nn_id, couple, crossover_hyper_params)
 
 proc crossover_and_add_to_population(
   top_ids: seq[int],
   couples: seq[((int, float32), (int, float32))],
+  crossover_hyper_params: Option[CrossoverHyperParams] = CrossoverHyperParams.none
 ) {.exportpy.} =
 
   for top_id in top_ids:
@@ -1591,7 +1603,7 @@ proc crossover_and_add_to_population(
 
     for item in zip(couples, (top.curr_pop_size ..< top.pop_size).to_seq):
       let (couple, nn_id) = item
-      crossover_one_couple_and_add_to_population(top, nn_id, couple)
+      crossover_one_couple_and_add_to_population(top, nn_id, couple, crossover_hyper_params)
 
     top.curr_pop_size = top.pop_size
 
@@ -1607,7 +1619,7 @@ when is_main_module:
 
   assert top.population.len == 10
 
-  # for i in 0..<100:
-  #   let (_, _, couples) = select_and_tournament(@[hyperneat_top_id], @[1.0'f32, 2.0, 3.0, 5.0, 4.0, 2.0, 3.0, 1.0, 2.0, 3.0], num_selected = 4, tournament_size = 2)
-  #   crossover_and_add_to_population(@[hyperneat_top_id], couples)
-  #   mutate_all(@[hyperneat_top_id])
+  for i in 0..<100:
+    let (_, _, couples) = select_and_tournament(@[hyperneat_top_id], @[1.0'f32, 2.0, 3.0, 5.0, 4.0, 2.0, 3.0, 1.0, 2.0, 3.0], num_selected = 4, tournament_size = 2)
+    crossover_and_add_to_population(@[hyperneat_top_id], couples)
+    mutate_all(@[hyperneat_top_id])
