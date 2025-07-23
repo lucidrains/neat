@@ -18,6 +18,11 @@ import std/[
   algorithm
 ]
 
+import nimpy/[
+  raw_buffers,
+  py_types
+]
+
 import bitvector
 
 import arraymancer
@@ -51,6 +56,45 @@ template benchmark(
     result += diff / trials
 
   echo name & ": average time over " & $trials & " trials is " & $(result * 1e3) & " ms"
+
+# from @Vindaar - https://github.com/yglukhov/nimpy/issues/114#issuecomment-531504502
+
+type
+  NumpyArray[T] = object
+    py_buf: ptr RawPyBuffer
+    data: ptr UncheckedArray[T]
+    shape: seq[int]
+    len: int
+
+proc init_nd_array[T](ar: PyObject): NumpyArray[T] =
+  result.py_buf = cast[ptr RawPyBuffer](alloc0(sizeof(RawPyBuffer)))
+  ar.get_buffer(result.py_buf[], PyBUF_WRITABLE or PyBUF_ND)
+  let shapear = cast[ptr UncheckedArray[Py_ssize_t]](result.py_buf.shape)
+
+  for i in 0 ..< result.py_buf.ndim:
+    let dimsize = shapear[i].int # py_ssize_t is csize
+    result.shape.add dimsize
+
+  result.len = result.shape.foldl(a * b, 1)
+  result.data = cast[ptr UncheckedArray[T]](result.py_buf.buf)
+
+proc release[T](nd: var NumpyArray[T]) =
+  nd.py_buf[].release()
+  dealloc(nd.py_buf)
+
+template parse_indices(
+  indices: seq[int],
+  shape: seq[int]
+): int =
+  var
+    res = indices[0]
+    stride = shape[0]
+
+  for axis, idx in indices[1 .. ^1]:
+    res += (stride * idx)
+    stride *= shape[axis + 1]
+
+  res
 
 # functions
 
@@ -153,6 +197,7 @@ type
   MetaEdge = ref object
     topology_id: int
     edge_id: int
+    can_disable: bool = true
     disabled: bool
     weight: float32
     local_from_node_id: int
@@ -433,6 +478,7 @@ proc init_nn(
         topology_id: top.id,
         edge_id: edge.id,
         disabled: false,
+        can_disable: coin_flip(),
         local_from_node_id: node_index[edge.from_node_id],
         local_to_node_id: node_index[edge.to_node_id],
         weight: random_normal()
@@ -849,27 +895,33 @@ proc set_population_exec_trace(
 
 proc evaluate_population(
   top_id: int,
-  inputs: seq[seq[float32]]
-): seq[seq[float32]] {.exportpy.} =
+  inputs: PyObject,
+  outputs: PyObject
+) {.exportpy.} =
 
   let top = topologies[top_id]
 
-  assert inputs.len == top.pop_size
+  var nd_array_inputs = init_nd_array[float32](inputs)
+  var nd_array_outputs = init_nd_array[float32](outputs)
+
+  let input_first_dim = nd_array_inputs.shape[0]
+  assert input_first_dim == top.pop_size
 
   # using weave for multi-threading
 
-  let output = new_seq_with(top.population.len, new_seq[float32](top.num_outputs))
-
   sync_scope():
 
-    for nn_id in 0 ..< inputs.len:
+    for nn_id in 0 ..< top.pop_size:
 
       let nn = top.population[nn_id]
 
+      let input_index = parse_indices(@[nn_id, 0], nd_array_inputs.shape)
+      let output_index = parse_indices(@[nn_id, 0], nd_array_outputs.shape)
+
       # input and output buffers for thread
 
-      let buffer_input = cast[ptr UncheckedArray[float32]](inputs[nn_id][0].addr)
-      let buffer_output = cast[ptr UncheckedArray[float32]](output[nn_id][0].addr)
+      let buffer_input = cast[ptr UncheckedArray[float32]](nd_array_inputs.data[input_index].addr)
+      let buffer_output = cast[ptr UncheckedArray[float32]](nd_array_outputs.data[output_index].addr)
 
       # spawn thread
 
@@ -881,7 +933,8 @@ proc evaluate_population(
 
   Weave.sync_root()
 
-  return output
+  nd_array_inputs.release()
+  nd_array_outputs.release()
 
 proc generate_hyper_weights(
   top_id: int,
@@ -1251,7 +1304,7 @@ proc mutate(
 
     # toggling an existing edge gene in the individual
 
-    if not satisfy_prob(toggle_meta_edge_prob):
+    if not (satisfy_prob(toggle_meta_edge_prob) and meta_edge.can_disable):
       continue
 
     meta_edge.disabled = meta_edge.disabled xor true

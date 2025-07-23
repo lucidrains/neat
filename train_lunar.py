@@ -34,7 +34,7 @@ FRAC_NATURAL_SELECTED = 0.25
 TOURNAMENT_FRAC = 0.25
 NUM_ROLLOUTS_BEFORE_EVO = 1
 
-WANDB_ONLINE = True # turn this on to pipe experiment to cloud
+WANDB_ONLINE = False # turn this on to pipe experiment to cloud
 
 RUN_NAME = f'neat-{POP_SIZE}' if TEST_REGULAR_NEAT else f'hyperneat-{POP_SIZE}'
 
@@ -182,7 +182,10 @@ for gen in tqdm(range(NUM_GENERATIONS)):
     )
 
     if TEST_REGULAR_NEAT:
-        log.update(population.stats()[0])
+        stats = population.stats()[0]
+        print(f"total nodes {stats['total_innovated_nodes']} | total edges: {stats['total_innovated_edges']}")
+
+        log.update(stats)
 
     wandb.log(log)
 

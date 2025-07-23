@@ -2,7 +2,7 @@ from __future__ import annotations
 from random import randrange
 from contextlib import contextmanager
 
-import jax
+import numpy as np
 from jax import (
     numpy as jnp,
     vmap,
@@ -34,7 +34,7 @@ from neat.neat_nim import (
     mutate_all,
     evaluate_nn_single,
     evaluate_population,
-    get_topology_info
+    get_topology_info,
 )
 
 # functions
@@ -300,6 +300,9 @@ class NEAT(GeneticAlgorithm):
 
         dim_in, *dim_hiddens, dim_out = dims
 
+        self.dim_in = dim_in
+        self.dim_out = dim_out
+
         self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size)
         self.all_top_ids = [self.top.id]
 
@@ -325,9 +328,12 @@ class NEAT(GeneticAlgorithm):
         sample = False,
         temperature = 1.,
     ):
-        logits = evaluate_population(self.top.id, state.tolist())
+        input = np.array(state, dtype = np.float32)
+        output = np.empty((state.shape[0], self.dim_out), dtype = np.float32)
 
-        logits = jnp.array(logits)
+        evaluate_population(self.top.id, input, output)
+
+        logits = jnp.array(output)
 
         if not sample:
             return logits
