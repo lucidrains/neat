@@ -12,14 +12,14 @@ def test_hyperneat():
     pop = HyperNEAT(10, 16, 16, 5, num_hiddens = 16, pop_size = 8)
 
     action_logits = pop.forward(jnp.zeros((8, 10)))
-    pop.genetic_algorithm_step(jnp.ones((8,)), num_selected = 4)
+    pop.genetic_algorithm_step(jnp.ones((8,)))
 
     assert action_logits.shape == (8, 5)
 
 def test_neat():
     pop = NEAT(10, 16, 5, pop_size = 8, mutation_hyper_params = dict(mutation_rate = 0.25))
     action_logits = pop.forward(jnp.zeros((8, 10)))
-    pop.genetic_algorithm_step(jnp.ones((8,)), num_selected = 4)
+    pop.genetic_algorithm_step(jnp.ones((8,)))
 
     assert action_logits.shape == (8, 5)
 
