@@ -65,6 +65,9 @@ CROSSOVER_HYPER_PARAMS = dict(
     prob_inherit_all_excess_genes = 1.0
 )
 
+RECORDING_FOLDER = './recordings'
+RECORDED_POPULATION_FOLDER = './recorded-populations'
+
 # experiment tracker
 
 wandb.init(project = 'lunar-neat', mode = 'disabled' if not WANDB_ONLINE else 'online')
@@ -84,7 +87,8 @@ envs = gym.make_vec(
 
 # recording does not work on vectorized env, just spin up temp env for recording, and take care of picking one agent from population to record
 
-rmtree('./recordings', ignore_errors = True)
+rmtree(RECORDING_FOLDER, ignore_errors = True)
+rmtree('./recorded-population', ignore_errors = True)
 
 env = gym.make(
     "LunarLander-v3",
@@ -93,7 +97,7 @@ env = gym.make(
 
 env = gym.wrappers.RecordVideo(
     env = env,
-    video_folder = './recordings',
+    video_folder = RECORDING_FOLDER,
     name_prefix = 'lunar-video',
     episode_trigger = lambda eps_num: True,
     disable_logger = True
@@ -120,7 +124,10 @@ def record_agent_(
 
     env.close()
 
-    video = wandb.Video(f'./recordings/lunar-video-episode-{num_recorded}.mp4', format = 'gif')
+    video = wandb.Video(
+        f'{RECORDING_FOLDER}/lunar-video-episode-{num_recorded}.mp4',
+        format = 'gif'
+    )
 
     wandb.log(dict(
         fittest_rollout = video
@@ -227,4 +234,4 @@ for gen in tqdm(range(NUM_GENERATIONS)):
 
 
     if divisible_by(gen + 1, SAVE_POPULATION_EVERY):
-        population.save_json(f'./population.step.{gen + 1}')
+        population.save_json(f'{RECORDED_POPULATION_FOLDER}/population.step.{gen + 1}')
