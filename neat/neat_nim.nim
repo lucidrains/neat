@@ -27,11 +27,7 @@ import bitvector
 
 import arraymancer
 
-import jsony
-
-import weave
-
-Weave.init()
+import malebolgia
 
 type
   Prob = range[0.0..1.0]
@@ -907,10 +903,11 @@ proc evaluate_population(
   let input_first_dim = nd_array_inputs.shape[0]
   assert input_first_dim == top.pop_size
 
-  # using weave for multi-threading
+  var master = create_master()
 
-  sync_scope():
+  # using malebolgia for multi-threading
 
+  master.await_all:
     for nn_id in 0 ..< top.pop_size:
 
       let nn = top.population[nn_id]
@@ -925,13 +922,11 @@ proc evaluate_population(
 
       # spawn thread
 
-      spawn evaluate_nn_single_with_trace_thread_fn(
+      master.spawn evaluate_nn_single_with_trace_thread_fn(
         nn.cached_exec_trace.get.addr,
         buffer_input,
         buffer_output
       )
-
-  Weave.sync_root()
 
   nd_array_inputs.release()
   nd_array_outputs.release()
