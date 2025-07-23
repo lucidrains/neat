@@ -30,13 +30,16 @@ NUM_HIDDEN_LAYERS = 0
 
 RECORD_EVERY = 10
 MAX_EPISODE_LEN = 250
-FRAC_NATURAL_SELECTED = 0.25
-TOURNAMENT_FRAC = 0.25
 NUM_ROLLOUTS_BEFORE_EVO = 1
 
 WANDB_ONLINE = False # turn this on to pipe experiment to cloud
 
 RUN_NAME = f'neat-{POP_SIZE}' if TEST_REGULAR_NEAT else f'hyperneat-{POP_SIZE}'
+
+SELECTION_HYPER_PARAMS = dict(
+    frac_natural_selected = 0.25,
+    tournament_frac = 0.25
+)
 
 MUTATION_HYPER_PARAMS = dict(
     mutate_prob = 0.95,
@@ -126,20 +129,24 @@ def record_agent_(
 dim_state = envs.observation_space.shape[-1]
 num_actions = 4
 
+evolution_hyper_params = dict(
+    mutation_hyper_params = MUTATION_HYPER_PARAMS,
+    crossover_hyper_params = CROSSOVER_HYPER_PARAMS,
+    selection_hyper_params = SELECTION_HYPER_PARAMS,
+)
+
 if TEST_REGULAR_NEAT:
     population = NEAT(
         dim_state, *((NUM_CPPN_HIDDEN_NODES,) * NUM_HIDDEN_LAYERS), num_actions,
         pop_size = POP_SIZE,
-        mutation_hyper_params = MUTATION_HYPER_PARAMS,
-        crossover_hyper_params = CROSSOVER_HYPER_PARAMS
+        **evolution_hyper_params
     )
 else:
     population = HyperNEAT(
         dim_state, 16, 16, num_actions,
         num_hiddens = (NUM_CPPN_HIDDEN_NODES,) * NUM_HIDDEN_LAYERS,
         pop_size = POP_SIZE,
-        mutation_hyper_params = MUTATION_HYPER_PARAMS,
-        crossover_hyper_params = CROSSOVER_HYPER_PARAMS
+        **evolution_hyper_params
     )
 
 # interact with environment across generations
@@ -193,11 +200,7 @@ for gen in tqdm(range(NUM_GENERATIONS)):
 
     # insilico evolution
 
-    population.genetic_algorithm_step(
-        fitnesses,
-        num_selected_frac = FRAC_NATURAL_SELECTED,
-        tournament_frac = TOURNAMENT_FRAC
-    )
+    population.genetic_algorithm_step(fitnesses)
 
     # logging
 

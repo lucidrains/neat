@@ -210,6 +210,17 @@ type
     meta_edges: seq[MetaEdge] = @[]
     cached_exec_trace: Option[ExecTrace]
 
+  # hyperparams
+
+  SelectionHyperParams = object
+    frac_natural_selected: float = 0.5
+    tournament_frac: float = 0.25
+
+  CrossoverHyperParams = object
+    prob_child_disabled_given_parent_cond: float = 0.75
+    prob_remove_disabled_node: float = 0.01
+    prob_inherit_all_excess_genes: float = 1.0
+
   MutationHyperParams = object
     mutate_prob: float = 0.95
     add_novel_edge_prob: float = 5e-3
@@ -224,11 +235,9 @@ type
     grow_node_prob: float = 1e-5             # similarly, some follow up research do a variation of the above and split an existing node into two nodes, in theory this leads to the network modularization
     perturb_weight_strength: float = 0.1
     perturb_bias_strength: float = 0.1
+    num_preserve_elites: int = 0
 
-  CrossoverHyperParams = object
-    prob_child_disabled_given_parent_cond: float = 0.75
-    prob_remove_disabled_node: float = 0.01
-    prob_inherit_all_excess_genes: float = 1.0
+  # 'topology' - rename to population at some point
 
   Topology = ref object
     id: int
@@ -254,9 +263,11 @@ type
 
     # default hyperparams
 
-    mutation_hyper_params: MutationHyperParams
+    selection_hyper_params: SelectionHyperParams
 
     crossover_hyper_params: CrossoverHyperParams
+
+    mutation_hyper_params: MutationHyperParams
 
   # crossover related
 
@@ -308,7 +319,8 @@ proc add_topology(
   num_outputs: int,
   num_hiddens: seq[int],
   mutation_hyper_params: MutationHyperParams = MutationHyperParams(),
-  crossover_hyper_params: CrossoverHyperParams = CrossoverHyperParams()
+  crossover_hyper_params: CrossoverHyperParams = CrossoverHyperParams(),
+  selection_hyper_params: SelectionHyperParams = SelectionHyperParams()
 ): int {.exportpy.} =
 
   let topology = Topology(
@@ -317,7 +329,8 @@ proc add_topology(
     num_outputs: num_outputs,
     num_hiddens: num_hiddens,
     mutation_hyper_params: mutation_hyper_params,
-    crossover_hyper_params: crossover_hyper_params
+    crossover_hyper_params: crossover_hyper_params,
+    selection_hyper_params: selection_hyper_params
   )
 
   topology.nodes_index = init_table[int, Node]()
@@ -1058,13 +1071,14 @@ proc tournament(
 proc select_and_tournament(
   top_ids: seq[int],
   fitnesses: seq[float32],
-  num_selected: range[1..int.high],
-  tournament_size: range[2..int.high]
+  selection_hyper_params: Option[SelectionHyperParams] = SelectionHyperParams.none
 ): (
   seq[int],
   seq[float32],
-  seq[((int, float32), (int, float32))]
+  Couples
 ) {.exportpy.} =
+
+  assert top_ids.len > 0
 
   assert top_ids.len > 0
 
@@ -1073,6 +1087,15 @@ proc select_and_tournament(
   let top = topologies[one_top_id]
 
   let pop_size = top.population.len
+
+  let hyper_params = selection_hyper_params.get(top.selection_hyper_params)
+
+  let num_selected = max(2, (hyper_params.frac_natural_selected * pop_size.float).int)
+
+  let tournament_size = max(2, (hyper_params.tournament_frac * num_selected.float).int)
+
+  assert tournament_size <= num_selected
+  assert pop_size > num_selected
 
   # select
 
@@ -1361,15 +1384,17 @@ proc mutate(
 
 proc mutate_all(
   all_top_ids: seq[int],
-  num_preserve_elites: int = 0,
   mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none
 ) {.exportpy.} =
 
   for top_id in all_top_ids:
     let top = topologies[top_id]
-    assert num_preserve_elites < top.population.len
 
-    for nn_id in num_preserve_elites ..< top.population.len:
+    let hyper_params = mutation_hyper_params.get(top.mutation_hyper_params)
+
+    assert hyper_params.num_preserve_elites < top.population.len
+    for nn_id in hyper_params.num_preserve_elites ..< top.population.len:
+
       mutate(top, nn_id, mutation_hyper_params)
 
     set_population_exec_trace(top_id)
@@ -1620,6 +1645,6 @@ when is_main_module:
   assert top.population.len == 10
 
   for i in 0..<100:
-    let (_, _, couples) = select_and_tournament(@[hyperneat_top_id], @[1.0'f32, 2.0, 3.0, 5.0, 4.0, 2.0, 3.0, 1.0, 2.0, 3.0], num_selected = 4, tournament_size = 2)
+    let (_, _, couples) = select_and_tournament(@[hyperneat_top_id], @[1.0'f32, 2.0, 3.0, 5.0, 4.0, 2.0, 3.0, 1.0, 2.0, 3.0])
     crossover_and_add_to_population(@[hyperneat_top_id], couples)
     mutate_all(@[hyperneat_top_id])

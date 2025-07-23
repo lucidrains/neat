@@ -71,12 +71,13 @@ class Topology:
         num_hiddens = 32,
         shape: tuple[int, ...] | None = None,
         mutation_hyper_params = None,
-        crossover_hyper_params = None
+        crossover_hyper_params = None,
+        selection_hyper_params = None
     ):
         if isinstance(num_hiddens, int):
             num_hiddens = (num_hiddens,)
 
-        self.id = add_topology(num_inputs, num_outputs, num_hiddens, mutation_hyper_params, crossover_hyper_params)
+        self.id = add_topology(num_inputs, num_outputs, num_hiddens, mutation_hyper_params, crossover_hyper_params, selection_hyper_params)
 
         self.init_population(pop_size)
 
@@ -152,27 +153,10 @@ class GeneticAlgorithm:
     def genetic_algorithm_step(
         self,
         fitnesses: Array,
-        num_selected = None,
-        num_selected_frac = None,
-        tournament_frac = 0.25,
-        num_preserve_elites_frac = 0.,
+        selection_hyper_params = dict(),
+        mutation_hyper_params = dict(),
+        crossover_hyper_params = dict()
     ):
-
-        assert exists(num_selected) ^ exists(num_selected_frac)
-
-        if exists(num_selected_frac):
-            assert 0. < num_selected_frac < 1.
-            num_selected = min(2, int(self.pop_size * num_selected_frac))
-
-        assert num_selected >= 2
-
-        assert 0. <= num_preserve_elites_frac <= 1.
-        assert 0. <= tournament_frac <= 1.
-
-        num_preserve_elites = int(num_preserve_elites_frac * num_selected)
-        assert num_preserve_elites < num_selected
-
-        tournament_size = max(2, int(tournament_frac * num_selected))
 
         # 1. selection
         # 2. tournament -> parent pairs
@@ -181,16 +165,16 @@ class GeneticAlgorithm:
             sel_indices,
             fitnesses,
             couples
-        ) = select_and_tournament(self.all_top_ids, fitnesses.tolist(), num_selected, tournament_size)
+        ) = select_and_tournament(self.all_top_ids, fitnesses.tolist(), selection_hyper_params)
 
         # 3. compute children with crossover
         # 4. concat children to population
 
-        crossover_and_add_to_population(self.all_top_ids, couples)
+        crossover_and_add_to_population(self.all_top_ids, couples, crossover_hyper_params)
 
         # 5. mutation
 
-        mutate_all(self.all_top_ids, num_preserve_elites)
+        mutate_all(self.all_top_ids, mutation_hyper_params)
 
 class HyperNEAT(GeneticAlgorithm):
     def __init__(
@@ -200,7 +184,8 @@ class HyperNEAT(GeneticAlgorithm):
         num_hiddens = 0,
         weight_norm = True,
         mutation_hyper_params = None,
-        crossover_hyper_params = None
+        crossover_hyper_params = None,
+        selection_hyper_params = None
     ):
 
         self.dims = dims
@@ -212,12 +197,18 @@ class HyperNEAT(GeneticAlgorithm):
         hyper_weights_nn = []
         hyper_biases_nn = []
 
+        evolution_hyper_params = dict(
+            mutation_hyper_params = mutation_hyper_params,
+            crossover_hyper_params = crossover_hyper_params,
+            selection_hyper_params = selection_hyper_params
+        )
+
         for dim_in, dim_out in self.dim_pairs:
             weight_shape = (dim_in, dim_out)
             bias_shape = (dim_out,)
 
-            hyper_weights_nn.append(Topology(2, 1, pop_size, num_hiddens = num_hiddens, shape = weight_shape, mutation_hyper_params = mutation_hyper_params, crossover_hyper_params = crossover_hyper_params))
-            hyper_biases_nn.append(Topology(1, 1, pop_size, num_hiddens = num_hiddens, shape = bias_shape, mutation_hyper_params = mutation_hyper_params, crossover_hyper_params = crossover_hyper_params))
+            hyper_weights_nn.append(Topology(2, 1, pop_size, num_hiddens = num_hiddens, shape = weight_shape, **evolution_hyper_params))
+            hyper_biases_nn.append(Topology(1, 1, pop_size, num_hiddens = num_hiddens, shape = bias_shape, **evolution_hyper_params))
 
         self.hyper_weights_nn = hyper_weights_nn
         self.hyper_biases_nn = hyper_biases_nn
@@ -283,7 +274,8 @@ class NEAT(GeneticAlgorithm):
         *dims,
         pop_size,
         mutation_hyper_params = None,
-        crossover_hyper_params = None
+        crossover_hyper_params = None,
+        selection_hyper_params = None
     ):
         self.dims = dims
         assert len(dims) >= 2
@@ -296,7 +288,7 @@ class NEAT(GeneticAlgorithm):
         self.dim_out = dim_out
         self.output = np.empty((pop_size, self.dim_out), dtype = np.float32)
 
-        self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size, mutation_hyper_params = mutation_hyper_params, crossover_hyper_params = crossover_hyper_params)
+        self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size, mutation_hyper_params = mutation_hyper_params, crossover_hyper_params = crossover_hyper_params, selection_hyper_params = selection_hyper_params)
         self.all_top_ids = [self.top.id]
 
     def single_forward(
