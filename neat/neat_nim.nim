@@ -1,5 +1,7 @@
 import nimpy
 
+import os
+
 import std/[
   random,
   times,
@@ -313,12 +315,17 @@ proc skip_hook*(T: typedesc[Topology], key: static string): bool =
 
 proc save_json_to_file(
   top_id: int,
-  filename: string
+  filepath: string
 ) {.exportpy.} =
 
   let top = topologies[top_id]
   let contents = (top.nodes, top.edges, top.population).to_json()
-  write_file(filename, contents.parse_json().pretty())
+
+  let (dir, name, ext) = split_file(filepath)
+  if not dir_exists(dir):
+    create_dir(dir)
+
+  write_file(filepath, contents.parse_json().pretty())
 
 # functions
 
