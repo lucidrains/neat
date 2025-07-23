@@ -23,8 +23,6 @@ from neat.neat_nim import (
     add_topology,
     remove_topology,
     init_population as init_population_nim,
-    init_top_lock,
-    deinit_top_lock,
     generate_hyper_weights as generate_hyper_weights_nim,
     generate_all_hyper_weights,
     crossover_and_add_to_population,
@@ -61,18 +59,6 @@ def gumbel_sample(t, temperature = 1.):
         t = t + gumbel_noise(t)
 
     return t.argmax(axis = -1).tolist()
-
-# locking
-
-@contextmanager
-def with_lock(top_ids):
-    for top_id in top_ids:
-        init_top_lock(top_id)
-
-    yield
-
-    for top_id in top_ids:
-        deinit_top_lock(top_id)
 
 # topology
 

@@ -13,7 +13,6 @@ import std/[
   tables,
   sugar,
   segfaults,
-  locks,
   atomics,
   algorithm
 ]
@@ -211,7 +210,6 @@ type
 
   Topology = ref object
     id: int
-    lock: Lock
 
     nodes: seq[Node] = @[] # nodes will be always arrange [input] [output] [hiddens]
     edges: seq[Edge] = @[]
@@ -342,14 +340,6 @@ proc add_topology(
 
 proc remove_topology(topology_id: int) {.exportpy.} =
   topologies.del(topology_id)
-
-proc init_top_lock(topology_id: int) {.exportpy.} =
-  let top = topologies[topology_id]
-  top.lock.init_lock()
-
-proc deinit_top_lock(topology_id: int) {.exportpy.} =
-  let top = topologies[topology_id]
-  top.lock.deinit_lock()
 
 proc add_node(
   top: Topology,
