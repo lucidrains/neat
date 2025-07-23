@@ -29,6 +29,8 @@ NUM_CPPN_HIDDEN_NODES = 16
 NUM_HIDDEN_LAYERS = 0
 
 RECORD_EVERY = 10
+SAVE_POPULATION_EVERY = 100
+
 MAX_EPISODE_LEN = 250
 NUM_ROLLOUTS_BEFORE_EVO = 1
 
@@ -223,3 +225,6 @@ for gen in tqdm(range(NUM_GENERATIONS)):
         record_agent_(0)
         num_recorded += 1
 
+
+    if divisible_by(gen + 1, SAVE_POPULATION_EVERY):
+        population.save_json(f'./population.step.{gen + 1}')

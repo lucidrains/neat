@@ -33,6 +33,7 @@ from neat.neat_nim import (
     evaluate_nn_single,
     evaluate_population,
     get_topology_info,
+    save_json_to_file
 )
 
 # functions
@@ -149,6 +150,10 @@ def mlp(
 class GeneticAlgorithm:
     def stats(self):
         return [get_topology_info(top_id) for top_id in self.all_top_ids]
+
+    def save_json(self, filename):
+        for top_id in self.all_top_ids:
+            save_json_to_file(top_id, f'{filename}.id.{top_id}.json')
 
     def genetic_algorithm_step(
         self,

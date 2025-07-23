@@ -22,6 +22,8 @@ import nimpy/[
   py_types
 ]
 
+import json
+
 import bitvector
 
 import arraymancer
@@ -300,6 +302,23 @@ proc get_topology_info(
 
   result.total_innovated_nodes = top.node_innovation_id.load + 1
   result.total_innovated_edges = top.edge_innovation_id.load + 1
+
+# saving population to pretty json for introspecting on evolved graphs
+
+proc skip_hook*(T: typedesc[NeuralNetwork], key: static string): bool =
+  key in ["cached_exec_trace"]
+
+proc skip_hook*(T: typedesc[Topology], key: static string): bool =
+  key in ["conn_index", "edges_index", "nodes_index", "node_innovation_id", "edge_innovation_id"]
+
+proc save_json_to_file(
+  top_id: int,
+  filename: string
+) {.exportpy.} =
+
+  let top = topologies[top_id]
+  let contents = (top.nodes, top.edges, top.population).to_json()
+  write_file(filename, contents.parse_json().pretty())
 
 # functions
 
@@ -1648,3 +1667,5 @@ when is_main_module:
     let (_, _, couples) = select_and_tournament(@[hyperneat_top_id], @[1.0'f32, 2.0, 3.0, 5.0, 4.0, 2.0, 3.0, 1.0, 2.0, 3.0])
     crossover_and_add_to_population(@[hyperneat_top_id], couples)
     mutate_all(@[hyperneat_top_id])
+
+  save_json_to_file(hyperneat_top_id, "./population.json")
