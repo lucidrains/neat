@@ -4,7 +4,7 @@ on: [push, pull_request]
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
     - uses: actions/checkout@v4
@@ -18,12 +18,6 @@ jobs:
       with:
         nim-version: '2.2.4'
         repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Set up GCC
-      uses: egor-tensin/setup-gcc@v1
-      with:
-        version: latest
-        platform: x64
 
     - name: Install Nim dependencies
       run: |
