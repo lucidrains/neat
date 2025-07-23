@@ -302,6 +302,7 @@ class NEAT(GeneticAlgorithm):
 
         self.dim_in = dim_in
         self.dim_out = dim_out
+        self.output = np.empty((pop_size, self.dim_out), dtype = np.float32)
 
         self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size)
         self.all_top_ids = [self.top.id]
@@ -329,11 +330,10 @@ class NEAT(GeneticAlgorithm):
         temperature = 1.,
     ):
         input = np.array(state, dtype = np.float32)
-        output = np.empty((state.shape[0], self.dim_out), dtype = np.float32)
 
-        evaluate_population(self.top.id, input, output)
+        evaluate_population(self.top.id, input, self.output)
 
-        logits = jnp.array(output)
+        logits = jnp.array(self.output)
 
         if not sample:
             return logits

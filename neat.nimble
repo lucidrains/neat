@@ -9,7 +9,7 @@ license       = "MIT"
 
 requires "arraymancer >= 0.7.33"
 requires "bitvector"
-requires "malebolgia"
+requires "malebolgia >= 1.3.2"
 requires "jsony"
 requires "nim >= 2.2.4"
 requires "nimpy >= 0.2.1"
