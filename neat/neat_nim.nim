@@ -15,7 +15,6 @@ import std/[
   tables,
   sugar,
   segfaults,
-  atomics,
   algorithm
 ]
 
@@ -258,8 +257,8 @@ type
     num_hiddens: seq[int] = @[]
 
     nn_id: int = 0
-    node_innovation_id: Atomic[int]
-    edge_innovation_id: Atomic[int]
+    node_innovation_id: int
+    edge_innovation_id: int
 
     pop_size: int = 0
     curr_pop_size: int = 0
@@ -292,7 +291,7 @@ type
 # globals
 
 var topologies = init_table[int, Topology]()
-var topology_id: Atomic[int]
+var topology_id: int
 
 # helper accessors
 
@@ -302,8 +301,8 @@ proc get_topology_info(
 
   let top = topologies[top_id]
 
-  result.total_innovated_nodes = top.node_innovation_id.load + 1
-  result.total_innovated_edges = top.edge_innovation_id.load + 1
+  result.total_innovated_nodes = top.node_innovation_id + 1
+  result.total_innovated_edges = top.edge_innovation_id + 1
 
 # saving population to pretty json for introspecting on evolved graphs
 
@@ -311,7 +310,7 @@ proc skip_hook*(T: typedesc[NeuralNetwork], key: static string): bool =
   key in ["cached_exec_trace"]
 
 proc skip_hook*(T: typedesc[Topology], key: static string): bool =
-  key in ["conn_index", "edges_index", "nodes_index", "node_innovation_id", "edge_innovation_id"]
+  key in ["conn_index", "edges_index", "nodes_index"]
 
 proc save_json_to_file(
   top_id: int,
@@ -350,7 +349,7 @@ proc add_topology(
 ): int {.exportpy.} =
 
   let topology = Topology(
-    id: topology_id.fetch_add(1),
+    id: topology_id,
     num_inputs: num_inputs,
     num_outputs: num_outputs,
     num_hiddens: num_hiddens,
@@ -358,6 +357,8 @@ proc add_topology(
     crossover_hyper_params: crossover_hyper_params,
     selection_hyper_params: selection_hyper_params
   )
+
+  topology_id += 1
 
   topology.nodes_index = init_table[int, Node]()
   topology.edges_index = init_table[int, Edge]()
@@ -419,9 +420,10 @@ proc add_node(
 
   # create node, increment primary key, and add to global nodes
 
-  let node = Node(id: top.node_innovation_id.fetch_add(1), topology_id: top.id)
+  let node = Node(id: top.node_innovation_id, topology_id: top.id)
   top.nodes.add(node)
   top.nodes_index[node.id] = node
+  top.node_innovation_id += 1
 
   return node.id
 
@@ -440,7 +442,7 @@ proc add_edge(
   # create edge, increment primary key and add to global edges
 
   let edge = Edge(
-    id: top.edge_innovation_id.fetch_add(1),
+    id: top.edge_innovation_id,
     topology_id: top.id,
     from_node_id: from_node_id,
     to_node_id: to_node_id
@@ -448,6 +450,7 @@ proc add_edge(
 
   top.edges.add(edge)
   top.edges_index[edge.id] = edge
+  top.edge_innovation_id += 1
   top.conn_index[(from_node_id, to_node_id)] = edge.id
 
   return edge.id
