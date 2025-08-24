@@ -419,7 +419,12 @@ proc add_node(
 
   # create node, increment primary key, and add to global nodes
 
-  let node = Node(id: top.node_innovation_id.fetch_add(1), topology_id: top.id)
+  let node = Node(
+    id: top.node_innovation_id.fetch_add(1),
+    type: node_type,
+    topology_id: top.id
+  )
+
   top.nodes.add(node)
   top.nodes_index[node.id] = node
 
@@ -1106,8 +1111,6 @@ proc select_and_tournament(
 
   assert top_ids.len > 0
 
-  assert top_ids.len > 0
-
   let one_top_id = top_ids[0]
 
   let top = topologies[one_top_id]
@@ -1387,8 +1390,9 @@ proc mutate(
         weight: random_normal()
       )
 
-      nn.meta_edges.add(new_meta_edge)
       edge_index[edge_id] = nn.meta_edges.len
+      nn.meta_edges.add(new_meta_edge)
+
       new_meta_edge
     else:
       nn.meta_edges[edge_index[edge_id]]
