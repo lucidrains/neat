@@ -19,7 +19,7 @@ jobs:
 
     - name: Install Nim dependencies
       run: |
-        nimble install
+        nimble install -y
 
     - name: Install dependencies
       run: |
@@ -29,6 +29,10 @@ jobs:
     - name: Test with pytest
       run: |
         python -m pytest tests/
+
+    - name: Install unittest2 for tests
+      run: |
+        nimble install unittest2 -y
 
     - name: Test nim
       run: |
