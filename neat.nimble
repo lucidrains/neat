@@ -17,4 +17,4 @@ requires "nimpy >= 0.2.1"
 # Tests
 
 task test, "Run unit tests":
-  exec "nim c -r tests/test_neat.nim"
+  exec "nim c -r tests/nim_test_neat.nim"
