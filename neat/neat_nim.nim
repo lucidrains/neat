@@ -275,15 +275,15 @@ type
 
   # crossover related
 
-  ParentAndFitness = tuple
+  ParentAndFitness* = tuple
     index: int
     fitness: float32
 
-  Couple = tuple
+  Couple* = tuple
     parent1: ParentAndFitness
     parent2: ParentAndFitness
 
-  Couples = seq[Couple]
+  Couples* = seq[Couple]
 
   TopologyInfo = object
     total_innovated_nodes: int
@@ -1067,7 +1067,7 @@ proc rand_activation(): Activation =
 
 # mutation and crossover
 
-proc tournament(
+proc tournament*(
   fitnesses: seq[float32],
   num_tournaments: range[1..int.high],
   tournament_size: range[2..int.high]

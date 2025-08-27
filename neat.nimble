@@ -13,3 +13,9 @@ requires "malebolgia >= 1.3.2"
 requires "jsony >= 1.1.5"
 requires "nim >= 2.2.4"
 requires "nimpy >= 0.2.1"
+requires "unittest2 >= 0.2.0"
+
+# Tests
+
+task test, "Run unit tests":
+  exec "nim c -r tests/test_neat.nim"
