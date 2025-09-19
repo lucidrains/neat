@@ -88,12 +88,12 @@ template parse_indices(
   shape: seq[int]
 ): int =
   var
-    res = indices[0]
-    stride = shape[0]
+    res = 0
+    stride = 1
 
-  for axis, idx in indices[1 .. ^1]:
-    res += (stride * idx)
-    stride *= shape[axis + 1]
+  for i in countdown(indices.high, 0):
+    res += indices[i] * stride
+    stride *= shape[i]
 
   res
 
@@ -953,8 +953,15 @@ proc evaluate_population(
   var nd_array_inputs = init_nd_array[float32](inputs)
   var nd_array_outputs = init_nd_array[float32](outputs)
 
+  # validate expected shapes
+  assert nd_array_inputs.shape.len == 2
+  assert nd_array_outputs.shape.len == 2
+
   let input_first_dim = nd_array_inputs.shape[0]
   assert input_first_dim == top.pop_size
+  assert nd_array_inputs.shape[1] == top.num_inputs
+  assert nd_array_outputs.shape[0] == top.pop_size
+  assert nd_array_outputs.shape[1] == top.num_outputs
 
   var master = create_master()
 
@@ -1174,7 +1181,8 @@ proc mutate(
   var node_index = init_table[int, int]()
   var edge_index = init_table[int, int]()
 
-  var global_conn_index = top.conn_index
+  # snapshot for safe iteration; use top.conn_index for existence checks
+  var snapshot_conn_index = top.conn_index
 
   # indexing global to local
 
@@ -1223,7 +1231,7 @@ proc mutate(
 
       var new_edge_ids: seq[int] = @[]
 
-      for node_from_to_id, edge_id in global_conn_index.pairs:
+      for node_from_to_id, edge_id in snapshot_conn_index.pairs:
         let (from_node_id, to_node_id) = node_from_to_id
 
         # only if this individual has the prerequisite afferent and efferent neurons
@@ -1370,14 +1378,14 @@ proc mutate(
 
     let random_conn_tuple = (from_node_id, to_node_id)
 
-    let exists_in_gene_pool = global_conn_index.has_key(random_conn_tuple)
+    let exists_in_gene_pool = top.conn_index.has_key(random_conn_tuple)
 
     # register novel edge in gene pool if not exists
 
     let edge_id = if not exists_in_gene_pool:
       add_edge(top, from_node_id, to_node_id)
     else:
-      global_conn_index[random_conn_tuple]
+      top.conn_index[random_conn_tuple]
 
     # # now add it to the individual
 

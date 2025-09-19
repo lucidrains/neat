@@ -291,6 +291,7 @@ class NEAT(GeneticAlgorithm):
 
         self.dim_in = dim_in
         self.dim_out = dim_out
+
         self.output = np.empty((pop_size, self.dim_out), dtype = np.float32)
 
         self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size, mutation_hyper_params = mutation_hyper_params, crossover_hyper_params = crossover_hyper_params, selection_hyper_params = selection_hyper_params)
