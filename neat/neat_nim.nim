@@ -168,9 +168,9 @@ type
     bias: float32
     trace: seq[WeightUpdate]
 
-  ExecTrace = tuple
+  ExecTrace = ref object
     node_info: NumNodesInfo
-    node_updatess: seq[NodeUpdate]
+    node_updates: seq[NodeUpdate]
 
   NodeType = enum
     input, output, hidden
@@ -831,7 +831,10 @@ proc evaluate_nn_exec_trace(
     let output_index = nn.num_inputs + i
     compute_node_value(output_index, visited, trace)
 
-  return ((top.num_inputs, top.num_outputs, num_nodes), trace)
+  return ExecTrace(
+    node_info: (top.num_inputs, top.num_outputs, num_nodes),
+    node_updates: trace
+  )
 
 proc evaluate_nn_exec_trace(
   top_id: int,
@@ -846,7 +849,8 @@ proc evaluate_nn_with_trace(
   inputs: seq[seq[float32]]
 ): seq[seq[float32]] {.gcsafe exportpy.} =
 
-  var (meta_info, trace) = trace_with_meta_info
+  var meta_info = trace_with_meta_info.node_info
+  var trace = trace_with_meta_info.node_updates
   let (num_inputs, num_outputs, num_nodes) = meta_info
 
   let seq_inputs_tensor = inputs.map(seq_float32 => seq_float32.to_tensor)
@@ -896,25 +900,27 @@ proc evaluate_nn_single(
   return outputs.map(tensor => tensor[0])
 
 proc evaluate_nn_single_with_trace_thread_fn(
-  trace: ptr ExecTrace,
+  trace_ptr: pointer,
   buffer_input: ptr UncheckedArray[float32],
   buffer_output: ptr UncheckedArray[float32]
 ) {.gcsafe.} =
 
-  let num_inputs = trace[].node_info.num_inputs
+  let trace = cast[ExecTrace](trace_ptr)
+  let num_inputs = trace.node_info.num_inputs
   var inputs = new_seq[float32](num_inputs)
 
   for i in 0 ..< num_inputs:
     inputs[i] = buffer_input[i]
 
-  var (meta_info, trace) = trace[]
+  var meta_info = trace.node_info
+  var trace_updates = trace.node_updates
   let (_, num_outputs, num_nodes) = meta_info
 
   var values = new_seq[float32](num_nodes)
 
   values &= inputs
 
-  for update_node in trace:
+  for update_node in trace_updates:
     let (to_id, act_index, bias, incoming_weights) = update_node
 
     values[to_id] = values[to_id] + bias
@@ -983,7 +989,7 @@ proc evaluate_population(
       # spawn thread
 
       master.spawn evaluate_nn_single_with_trace_thread_fn(
-        nn.cached_exec_trace.get.addr,
+        cast[pointer](nn.cached_exec_trace.get),
         buffer_input,
         buffer_output
       )

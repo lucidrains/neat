@@ -24,9 +24,9 @@ def divisible_by(num, den):
 NUM_GENERATIONS = 2000
 
 TEST_REGULAR_NEAT = True
-POP_SIZE = 200
+POP_SIZE = 250
 NUM_CPPN_HIDDEN_NODES = 16
-NUM_HIDDEN_LAYERS = 1
+NUM_HIDDEN_LAYERS = 2
 
 RECORD_EVERY = 10
 SAVE_POPULATION_EVERY = 100
@@ -45,7 +45,7 @@ SELECTION_HYPER_PARAMS = dict(
 
 MUTATION_HYPER_PARAMS = dict(
     mutate_prob = 0.95,
-    add_novel_edge_prob = 5e-3,
+    add_novel_edge_prob = 5e-4,
     toggle_meta_edge_prob = 0.05,
     add_remove_node_prob = 1e-5,
     change_activation_prob = 0.001,
@@ -53,8 +53,8 @@ MUTATION_HYPER_PARAMS = dict(
     replace_edge_weight_prob = 0.1,    # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
     change_node_bias_prob = 0.1,
     replace_node_bias_prob = 0.1,
-    grow_edge_prob = 5e-4,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
-    grow_node_prob = 1e-5,             # similarly, some follow up research do a variation of the above and split an existing node into two nodes, in theory this leads to the network modularization
+    grow_edge_prob = 5e-5,             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
+    grow_node_prob = 1e-6,             # similarly, some follow up research do a variation of the above and split an existing node into two nodes, in theory this leads to the network modularization
     perturb_weight_strength = 0.1,
     perturb_bias_strength = 0.1
 )
@@ -169,7 +169,7 @@ for gen in tqdm(range(NUM_GENERATIONS)):
 
         state, _ = envs.reset(seed = seed)
 
-        done = None
+        done = np.zeros((POP_SIZE,), dtype = bool)
         time = 0
         rewards = []
 
@@ -181,10 +181,10 @@ for gen in tqdm(range(NUM_GENERATIONS)):
             # gymnasium should just make terminated always True if one env terminates before the other..
 
             is_done_this_step = truncated | terminated
-            done = default(done, is_done_this_step)
-            done |= is_done_this_step
 
-            step_reward = reward * done.astype(jnp.float32)  # insurance, in case gymnasium borks and returns rewards for terminated envs in a collection of vec envs
+            step_reward = reward * (~done).astype(jnp.float32)
+
+            done |= is_done_this_step
 
             rewards.append(step_reward)
             state = next_state
@@ -196,8 +196,6 @@ for gen in tqdm(range(NUM_GENERATIONS)):
                 break
 
             time += 1
-
-        envs.close()
 
         rewards = jnp.stack(rewards)
 
