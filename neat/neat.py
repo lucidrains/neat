@@ -5,15 +5,6 @@ from random import randrange
 from contextlib import contextmanager
 
 import numpy as np
-from jax import (
-    numpy as jnp,
-    random,
-    jit,
-    nn,
-    Array,
-)
-
-from jax.tree_util import tree_map
 
 import nimporter
 
@@ -44,18 +35,10 @@ def default(v, d):
 
 # sampling
 
-def log(t, eps = 1e-20):
-    return jnp.log(t + eps)
-
-def gumbel_noise(t):
-    key = random.PRNGKey(randrange(int(1e6)))
-    noise = random.uniform(key, t.shape)
-    return -log(-log(noise))
-
 def gumbel_sample(t, temperature = 1.):
     if temperature > 0.:
         t = t / temperature
-        t = t + gumbel_noise(t)
+        t = t - np.log(-np.log(np.random.uniform(1e-20, 1.0, t.shape).astype(np.float32)))
 
     return t.argmax(axis = -1).tolist()
 
@@ -121,12 +104,14 @@ class GeneticAlgorithm:
         # 1. selection
         # 2. tournament -> parent pairs
 
+        fitnesses_list = fitnesses.tolist()
+
         (
             sel_indices,
             sel_fitnesses,
             couples,
             target_nn_ids
-        ) = select_and_tournament(self.all_top_ids, fitnesses.tolist(), selection_hyper_params)
+        ) = select_and_tournament(self.all_top_ids, fitnesses_list, selection_hyper_params)
 
         # 3. compute children with crossover
         # 4. concat children to population
@@ -141,7 +126,7 @@ class GeneticAlgorithm:
         # 6. island reset
 
         if reset_islands_num > 0:
-            reset_islands_nim(self.all_top_ids, fitnesses.tolist(), reset_islands_num, reset_islands_tournament_size)
+            reset_islands_nim(self.all_top_ids, fitnesses_list, reset_islands_num, reset_islands_tournament_size)
 
         # 7. mutation
 
@@ -174,13 +159,11 @@ class NEAT(GeneticAlgorithm):
     def single_forward(
         self,
         index: int,
-        state: Array,
+        state,
         sample = False,
         temperature = 1.
     ):
-        logits = evaluate_nn_single(self.top.id, index, state.tolist(), use_exec_cache = True)
-
-        logits = jnp.array(logits)
+        logits = np.array(evaluate_nn_single(self.top.id, index, state.tolist(), use_exec_cache = True), dtype = np.float32)
 
         if not sample:
             return logits
@@ -189,17 +172,15 @@ class NEAT(GeneticAlgorithm):
 
     def forward(
         self,
-        state: Array,
+        state,
         sample = False,
         temperature = 1.,
     ):
-        input = np.array(state, dtype = np.float32)
+        input = np.ascontiguousarray(state, dtype = np.float32)
 
         evaluate_population(self.top.id, input, self.output)
 
-        logits = jnp.array(self.output)
-
         if not sample:
-            return logits
+            return self.output
 
-        return gumbel_sample(logits, temperature = temperature)
+        return gumbel_sample(self.output, temperature = temperature)

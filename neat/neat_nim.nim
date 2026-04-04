@@ -1,7 +1,3 @@
-import nimpy
-
-import os
-
 import std/[
   random,
   times,
@@ -16,23 +12,20 @@ import std/[
   sugar,
   segfaults,
   atomics,
-  algorithm
+  algorithm,
+  os,
+  json
 ]
 
-import nimpy/[
-  raw_buffers,
-  py_types
-]
-
-import json
-
-import bitvector
+import nimpy
+import nimpy/[raw_buffers, py_types]
 
 import arraymancer
-
+import bitvector
 import jsony
-
 import malebolgia
+
+var master = create_master()
 
 type
   Prob = range[0.0..1.0]
@@ -109,6 +102,26 @@ proc coin_flip(): bool = satisfy_prob(0.5)
 proc random_normal(eps: float = 1e-30): float32 =
   sqrt(-2 * ln(max(eps, rand(1.0)))) * cos(2 * PI * rand(1.0))
 
+# fast genetic algorithm - https://arxiv.org/abs/1703.03334
+
+proc sample_power_law(half_len: int, beta: float): int =
+  ## sample k from discrete power law P(k) ∝ k^{-β}, k ∈ [1, half_len]
+  var total = 0.0
+  for k in 1..half_len:
+    total += pow(k.float, -beta)
+  let r = rand(total)
+  var cumsum = 0.0
+  for k in 1..half_len:
+    cumsum += pow(k.float, -beta)
+    if r <= cumsum: return k
+  half_len
+
+proc sample_waiting_time(prob: float): int =
+  ## geometric skip - number of trials until first success
+  if prob <= 0.0: return int.high
+  if prob >= 1.0: return 1
+  1 + (ln(1.0 - max(rand(1.0), 1e-15)) / ln(1.0 - prob)).floor.int
+
 # activation functions
 
 proc sigmoid(x: float32): float32 = 1.0 / (1.0 + exp(-x))
@@ -122,9 +135,6 @@ type
   Activation = enum
     identity, sigmoid, tanh, relu, clamp, elu, gauss, sin, abs
 
-# types
-
-type
   NumNodesInfo = tuple
     num_inputs: int
     num_outputs: int
@@ -191,6 +201,8 @@ type
   SelectionHyperParams = object
     frac_natural_selected: float = 0.5
     tournament_size: int = 3
+    use_queen_bee: bool = false
+    queen_strong_mutation_rate: float = 0.25
 
   CrossoverHyperParams = object
     prob_child_disabled_given_parent_cond: float = 0.75
@@ -199,16 +211,18 @@ type
 
   MutationHyperParams = object
     mutate_prob: float = 0.95
+    use_fast_ga: bool = false
+    fast_ga_beta: float = 1.5
     add_novel_edge_prob: float = 5e-3
     toggle_meta_edge_prob: float = 0.05
     add_remove_node_prob: float = 1e-5
     change_activation_prob: float = 0.001
     change_edge_weight_prob: float = 0.5
-    replace_edge_weight_prob: float = 0.1    # the percentage of time to replace the edge weight wholesale, which they did in the paper in addition to perturbing
+    replace_edge_weight_prob: float = 0.1
     change_node_bias_prob: float = 0.1
     replace_node_bias_prob: float = 0.1
-    grow_edge_prob: float = 5e-4             # this is the mutation introduced in the seminal NEAT paper that takes an existing edge for a CPPN and disables it, replacing it with a new node plus two new edges. the afferent edge is initialized to 1, the efferent inherits same weight as the one disabled. this is something currently neural network frameworks simply cannot do, and what interests me
-    grow_node_prob: float = 1e-5             # similarly, some follow up research do a variation of the above and split an existing node into two nodes, in theory this leads to the network modularization
+    grow_edge_prob: float = 5e-4
+    grow_node_prob: float = 1e-5
     perturb_weight_strength: float = 0.1
     perturb_bias_strength: float = 0.1
     num_preserve_elites: int = 0
@@ -877,6 +891,8 @@ proc evaluate_nn_single(
 
   return outputs.map(tensor => tensor[0])
 
+var thread_local_values {.threadvar.}: seq[float32]
+
 proc evaluate_nn_single_with_trace_thread_fn(
   trace_ptr: pointer,
   buffer_input: ptr UncheckedArray[float32],
@@ -885,34 +901,33 @@ proc evaluate_nn_single_with_trace_thread_fn(
 
   let trace = cast[ExecTrace](trace_ptr)
   let num_inputs = trace.node_info.num_inputs
-  var inputs = new_seq[float32](num_inputs)
-
-  for i in 0 ..< num_inputs:
-    inputs[i] = buffer_input[i]
-
   var meta_info = trace.node_info
   var trace_updates = trace.node_updates
   let (_, num_outputs, num_nodes) = meta_info
 
-  var values = new_seq[float32](num_nodes)
+  let req_len = num_nodes + num_inputs
+  if thread_local_values.len < req_len:
+    thread_local_values.setLen(req_len)
 
-  values &= inputs
+  # copy inputs to the end of the buffer
+  for i in 0 ..< num_inputs:
+    thread_local_values[num_nodes + i] = buffer_input[i]
 
   for update_node in trace_updates:
     let (to_id, act_index, bias, incoming_weights) = update_node
 
-    values[to_id] = values[to_id] + bias
+    var current_val = bias
 
     for incoming_weight in incoming_weights:
       let (weight, from_id) = incoming_weight
-      values[to_id] += weight * values[from_id]
+      current_val += weight * thread_local_values[from_id]
 
-    values[to_id] = Activation(act_index).activate(values[to_id])
+    thread_local_values[to_id] = Activation(act_index).activate(current_val)
 
-  # values is [inputs] [output] [hiddens] [init inputs]
-
+  # write output
   for i in 0 ..< num_outputs:
-    buffer_output[i] = values[i + num_inputs]
+    buffer_output[i] = thread_local_values[num_inputs + i]
+
 
 proc set_population_exec_trace(
   top_id: int
@@ -940,31 +955,20 @@ proc evaluate_population(
   # validate expected shapes
   assert nd_array_inputs.shape.len == 2
   assert nd_array_outputs.shape.len == 2
-
-  let input_first_dim = nd_array_inputs.shape[0]
-  assert input_first_dim == top.pop_size
+  assert nd_array_inputs.shape[0] == top.pop_size
   assert nd_array_inputs.shape[1] == top.num_inputs
   assert nd_array_outputs.shape[0] == top.pop_size
   assert nd_array_outputs.shape[1] == top.num_outputs
 
-  var master = create_master()
-
-  # using malebolgia for multi-threading
+  let num_inputs = top.num_inputs
+  let num_outputs = top.num_outputs
 
   master.await_all:
     for nn_id in 0 ..< top.pop_size:
-
       let nn = top.population[nn_id]
 
-      let input_index = parse_indices(@[nn_id, 0], nd_array_inputs.shape)
-      let output_index = parse_indices(@[nn_id, 0], nd_array_outputs.shape)
-
-      # input and output buffers for thread
-
-      let buffer_input = cast[ptr UncheckedArray[float32]](nd_array_inputs.data[input_index].addr)
-      let buffer_output = cast[ptr UncheckedArray[float32]](nd_array_outputs.data[output_index].addr)
-
-      # spawn thread
+      let buffer_input = cast[ptr UncheckedArray[float32]](nd_array_inputs.data[nn_id * num_inputs].addr)
+      let buffer_output = cast[ptr UncheckedArray[float32]](nd_array_outputs.data[nn_id * num_outputs].addr)
 
       master.spawn evaluate_nn_single_with_trace_thread_fn(
         cast[pointer](nn.cached_exec_trace.get),
@@ -1107,8 +1111,14 @@ proc select_and_tournament(
     for couple in parent_indices:
       let ((p1_idx, p1_fit), (p2_idx, p2_fit)) = couple
       let global_p1_idx = selected_sorted_indices[p1_idx] + offset
-      let global_p2_idx = selected_sorted_indices[p2_idx] + offset
-      all_parent_indices.add(((global_p1_idx, p1_fit), (global_p2_idx, p2_fit)))
+      var global_p2_idx = selected_sorted_indices[p2_idx] + offset
+      var final_p2_fit = p2_fit
+
+      if hyper_params.use_queen_bee:
+        global_p2_idx = selected_sorted_indices[0] + offset
+        final_p2_fit = selected_sorted_fitnesses[0]
+
+      all_parent_indices.add(((global_p1_idx, p1_fit), (global_p2_idx, final_p2_fit)))
 
     for top_id in top_ids:
       let top = topologies[top_id]
@@ -1150,36 +1160,60 @@ proc mutate(
   let meta_nodes_len = nn.meta_nodes.len
   let meta_edges_len = nn.meta_edges.len
 
+  template perturb_value(val: var float32, replace_prob: float, perturb_strength: float, max_mag: float) =
+    if satisfy_prob(replace_prob):
+      val = random_normal()
+    else:
+      val += random_normal() * perturb_strength
+    val = max(min(val, max_mag), -max_mag)
+
+  template fast_ga_loop(length: int, beta: float, idx: untyped, body: untyped) =
+    if length > 0:
+      let rate = sample_power_law(max(length div 2, 1), beta).float / length.float
+      var idx = sample_waiting_time(rate) - 1
+      while idx < length:
+        body
+        idx += sample_waiting_time(rate)
+
   # mutating nodes
 
-  for local_node_id in 0 ..< meta_nodes_len:
-    let meta_node = nn.meta_nodes[local_node_id]
-    if meta_node.disabled: continue
-    if meta_node.can_disable and satisfy_prob(hparams.add_remove_node_prob):
-      meta_node.disabled = meta_node.disabled xor true
-    if meta_node.can_change_activation and satisfy_prob(hparams.change_activation_prob):
-      meta_node.activation = rand_activation()
-    if satisfy_prob(hparams.change_node_bias_prob):
-      if satisfy_prob(hparams.replace_node_bias_prob):
-        meta_node.bias = random_normal()
-      else:
-        meta_node.bias += random_normal() * hparams.perturb_bias_strength
-      meta_node.bias = max(min(meta_node.bias, hparams.max_weight_magnitude), -hparams.max_weight_magnitude)
+  for i in 0 ..< meta_nodes_len:
+    let node = nn.meta_nodes[i]
+    if node.disabled: continue
+
+    if node.can_disable and satisfy_prob(hparams.add_remove_node_prob):
+      node.disabled = not node.disabled
+
+    if node.can_change_activation and satisfy_prob(hparams.change_activation_prob):
+      node.activation = rand_activation()
+    
+    if not hparams.use_fast_ga and satisfy_prob(hparams.change_node_bias_prob):
+      perturb_value(node.bias, hparams.replace_node_bias_prob, hparams.perturb_bias_strength, hparams.max_weight_magnitude)
+
+  if hparams.use_fast_ga:
+    fast_ga_loop(meta_nodes_len, hparams.fast_ga_beta, i):
+      let node = nn.meta_nodes[i]
+      if not node.disabled:
+        perturb_value(node.bias, hparams.replace_node_bias_prob, hparams.perturb_bias_strength, hparams.max_weight_magnitude)
 
   # mutating edges
 
-  for meta_edge_index in 0 ..< meta_edges_len:
-    let meta_edge = nn.meta_edges[meta_edge_index]
-    if meta_edge.disabled: continue
-    if satisfy_prob(hparams.change_edge_weight_prob):
-      if satisfy_prob(hparams.replace_edge_weight_prob):
-        meta_edge.weight = random_normal()
-      else:
-        meta_edge.weight += random_normal() * hparams.perturb_weight_strength
-      meta_edge.weight = max(min(meta_edge.weight, hparams.max_weight_magnitude), -hparams.max_weight_magnitude)
-    if not (satisfy_prob(hparams.toggle_meta_edge_prob) and meta_edge.can_disable): continue
-    meta_edge.disabled = meta_edge.disabled xor true
-    if not meta_edge.disabled: meta_edge.weight = random_normal()
+  for i in 0 ..< meta_edges_len:
+    let edge = nn.meta_edges[i]
+    if edge.disabled: continue
+
+    if not hparams.use_fast_ga and satisfy_prob(hparams.change_edge_weight_prob):
+      perturb_value(edge.weight, hparams.replace_edge_weight_prob, hparams.perturb_weight_strength, hparams.max_weight_magnitude)
+
+    if edge.can_disable and satisfy_prob(hparams.toggle_meta_edge_prob):
+      edge.disabled = not edge.disabled
+      if not edge.disabled: edge.weight = random_normal()
+
+  if hparams.use_fast_ga:
+    fast_ga_loop(meta_edges_len, hparams.fast_ga_beta, i):
+      let edge = nn.meta_edges[i]
+      if not edge.disabled:
+        perturb_value(edge.weight, hparams.replace_edge_weight_prob, hparams.perturb_weight_strength, hparams.max_weight_magnitude)
 
   # structural mutations - fired ONCE per individual, not per node/edge
 
@@ -1507,13 +1541,27 @@ proc crossover_one_couple_and_add_to_population(
 ) {.exportpy.} =
 
   let (parent1_info, parent2_info) = couple
-
   let (parent1, fitness1) = parent1_info
   let (parent2, fitness2) = parent2_info
+  
+  let sel_params = top.selection_hyper_params
 
-  let child = crossover(top, parent1, parent2, fitness1, fitness2, crossover_hyper_params)
+  if sel_params.use_queen_bee:
+    let drone_clone = crossover(top, parent1, parent1, fitness1, fitness1, crossover_hyper_params)
+    top.population[nn_id] = drone_clone
 
-  top.population[nn_id] = child
+    var strong_mut = top.mutation_hyper_params
+    strong_mut.mutate_prob = 1.0
+    strong_mut.change_edge_weight_prob = min(1.0, strong_mut.change_edge_weight_prob + sel_params.queen_strong_mutation_rate)
+    strong_mut.replace_edge_weight_prob = min(1.0, strong_mut.replace_edge_weight_prob + sel_params.queen_strong_mutation_rate)
+    
+    mutate(top, nn_id, strong_mut.some)
+
+    let final_child = crossover(top, nn_id, parent2, fitness1, fitness2, crossover_hyper_params)
+    top.population[nn_id] = final_child
+  else:
+    let child = crossover(top, parent1, parent2, fitness1, fitness2, crossover_hyper_params)
+    top.population[nn_id] = child
 
 proc crossover_one_couple_and_add_to_population(
   top_id: int,

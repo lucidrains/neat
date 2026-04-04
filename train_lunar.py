@@ -1,7 +1,6 @@
 # /// script
 # requires = [
 #     "gymnasium[box2d]",
-#     "jax",
 #     "numpy",
 #     "tqdm",
 #     "wandb",
@@ -14,7 +13,6 @@ from shutil import rmtree
 import numpy as np
 from random import randrange
 from tqdm import tqdm
-import jax.numpy as jnp
 import gymnasium as gym
 import wandb
 import fire
@@ -36,7 +34,7 @@ def divisible_by(num, den):
 
 def train(
     num_generations: int = 250,
-    pop_size: int = 500,
+    pop_size: int = 250,
 
     # neat configurations
 
@@ -53,6 +51,8 @@ def train(
     # selection parameters
     frac_natural_selected: float = 0.15,
     tournament_size: int = 3,
+    use_queen_bee: bool = False,
+    queen_strong_mutation_rate: float = 0.25,
 
     # island parameters
     num_islands: int = 5,
@@ -63,6 +63,8 @@ def train(
 
     # mutation parameters
     mutate_prob: float = 0.95,
+    use_fast_ga: bool = False,
+    fast_ga_beta: float = 1.5,
     add_novel_edge_prob: float = 0.05,
     toggle_meta_edge_prob: float = 0.05,
     add_remove_node_prob: float = 1e-5,
@@ -94,11 +96,15 @@ def train(
 
     selection_hyper_params = dict(
         frac_natural_selected = frac_natural_selected,
-        tournament_size = tournament_size
+        tournament_size = tournament_size,
+        use_queen_bee = use_queen_bee,
+        queen_strong_mutation_rate = queen_strong_mutation_rate
     )
 
     mutation_hyper_params = dict(
         mutate_prob = mutate_prob,
+        use_fast_ga = use_fast_ga,
+        fast_ga_beta = fast_ga_beta,
         add_novel_edge_prob = add_novel_edge_prob,
         toggle_meta_edge_prob = toggle_meta_edge_prob,
         add_remove_node_prob = add_remove_node_prob,
