@@ -5,13 +5,7 @@ Explorations into NEAT and some of its derivative research
 ## quick test
 
 ```bash
-$ sh install_gym.sh
-```
-
-Then
-
-```bash
-$ pip install '.[gym]' && python train_lunar.py
+$ uv run train_lunar.py
 ```
 
 ## citations

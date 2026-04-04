@@ -99,52 +99,24 @@ template parse_indices(
 
 # functions
 
-proc satisfy_prob(
-  prob: Prob
-): bool =
+proc satisfy_prob(prob: Prob): bool =
+  if prob == 0.0: return false
+  if prob == 1.0: return true
+  rand(1.0) < prob
 
-  if prob == 0.0:
-    return false
-  elif prob == 1.0:
-    return true
+proc coin_flip(): bool = satisfy_prob(0.5)
 
-  return rand(1.0) < prob
-
-proc coin_flip(): bool =
-  return satisfy_prob(0.5)
-
-proc random_normal(
-  eps: float = 1e-30
-): float32 =
-  # box-muller for random normal
-  let
-    u1 = rand(1.0)
-    u2 = rand(1.0)
-
-  return sqrt(-2 * ln(max(eps, u1))) * cos(2 * PI * u2)
+proc random_normal(eps: float = 1e-30): float32 =
+  sqrt(-2 * ln(max(eps, rand(1.0)))) * cos(2 * PI * rand(1.0))
 
 # activation functions
 
-proc sigmoid(x: float32): float32 =
-  return (1.0 / (1.0 + exp(-x)))
-
-proc relu(x: float32): float32 =
-  return max(x, 0.0)
-
-proc gauss(x: float32): float32 =
-  return exp(-pow(x, 2))
-
-proc identity(x: float32): float32 =
-  return x
-
-proc elu(x: float32): float32 =
-  if x >= 0.0:
-    result = x
-  else:
-    result = exp(x) - 1.0
-
-proc clamp_one(x: float32): float32 =
-  return max(min(x, 1.0), -1.0)
+proc sigmoid(x: float32): float32 = 1.0 / (1.0 + exp(-x))
+proc relu(x: float32): float32 = max(x, 0.0)
+proc gauss(x: float32): float32 = exp(-pow(x, 2))
+proc identity(x: float32): float32 = x
+proc elu(x: float32): float32 = (if x >= 0.0: x else: exp(x) - 1.0)
+proc clamp_one(x: float32): float32 = max(min(x, 1.0), -1.0)
 
 type
   Activation = enum
@@ -218,7 +190,7 @@ type
 
   SelectionHyperParams = object
     frac_natural_selected: float = 0.5
-    tournament_frac: float = 0.25
+    tournament_size: int = 3
 
   CrossoverHyperParams = object
     prob_child_disabled_given_parent_cond: float = 0.75
@@ -240,6 +212,7 @@ type
     perturb_weight_strength: float = 0.1
     perturb_bias_strength: float = 0.1
     num_preserve_elites: int = 0
+    max_weight_magnitude: float = 30.0
 
   # 'topology' - rename to population at some point
 
@@ -252,6 +225,7 @@ type
     nodes_index: Table[int, Node]
     edges_index: Table[int, Edge]
     conn_index: Table[(int, int), int]
+    edge_splits: Table[int, (int, int, int)]
 
     num_inputs: int
     num_outputs: int
@@ -261,6 +235,7 @@ type
     node_innovation_id: Atomic[int]
     edge_innovation_id: Atomic[int]
 
+    num_islands: int = 1
     pop_size: int = 0
     curr_pop_size: int = 0
     population: seq[NeuralNetwork] = @[]
@@ -346,7 +321,8 @@ proc add_topology(
   num_hiddens: seq[int],
   mutation_hyper_params: MutationHyperParams = MutationHyperParams(),
   crossover_hyper_params: CrossoverHyperParams = CrossoverHyperParams(),
-  selection_hyper_params: SelectionHyperParams = SelectionHyperParams()
+  selection_hyper_params: SelectionHyperParams = SelectionHyperParams(),
+  num_islands: int = 1
 ): int {.exportpy.} =
 
   let topology = Topology(
@@ -356,12 +332,14 @@ proc add_topology(
     num_hiddens: num_hiddens,
     mutation_hyper_params: mutation_hyper_params,
     crossover_hyper_params: crossover_hyper_params,
-    selection_hyper_params: selection_hyper_params
+    selection_hyper_params: selection_hyper_params,
+    num_islands: num_islands
   )
 
   topology.nodes_index = init_table[int, Node]()
   topology.edges_index = init_table[int, Edge]()
   topology.conn_index = init_table[(int, int), int]()
+  topology.edge_splits = init_table[int, (int, int, int)]()
 
   topologies[topology.id] = topology
 
@@ -509,7 +487,7 @@ proc init_nn(
       disabled: false,
       can_disable: false,
       can_change_activation: false,
-      activation: sigmoid
+      activation: identity
     )
 
     node_index[node.id] = nn.meta_nodes.len
@@ -997,44 +975,6 @@ proc evaluate_population(
   nd_array_inputs.release()
   nd_array_outputs.release()
 
-proc generate_hyper_weights(
-  top_id: int,
-  nn_id: int,
-  shape: seq[int]
-): seq[float32] {.exportpy.} =
-
-  let top = topologies[top_id]
-
-  assert top.num_inputs == shape.len
-
-  let
-    first_axis = shape[0]
-    rest_axis = shape[1..^1]
-
-  var coors = linspace(-1.0, 1.0, shape[0]).as_type(float32)
-  coors = coors.reshape(1, first_axis)
-
-  for dim in rest_axis:
-    var next_dim_coors = linspace(0.0, 1.0, dim).as_type(float32)
-    next_dim_coors = next_dim_coors.reshape(1, 1, dim).broadcast(1, coors.shape[1], dim)
-    coors = coors.reshape(coors.shape[0], coors.shape[1], 1).broadcast(coors.shape[0], coors.shape[1], dim)
-    coors = concat(coors, next_dim_coors, axis = 0)
-    coors = coors.reshape(coors.shape[0], coors.shape[1] * coors.shape[2])
-
-  var weights = evaluate_nn(top_id, nn_id, coors.to_seq_2d).to_tensor
-  let meta_data = to_metadata(shape)
-
-  return weights.reshape(meta_data).to_seq
-
-proc generate_all_hyper_weights(
-  top_id: int,
-  shape: seq[int]
-): seq[seq[float32]] {.exportpy.} =
-  let top = topologies[top_id]
-
-  for nn_id in 0 ..< top.population.len:
-    result.add(generate_hyper_weights(top_id, nn_id, shape))
-
 proc activate(
   node: MetaNode,
   input: Tensor[float32]
@@ -1119,58 +1059,67 @@ proc select_and_tournament(
 ): (
   seq[int],
   seq[float32],
-  Couples
+  Couples,
+  seq[int]
 ) {.exportpy.} =
 
   assert top_ids.len > 0
+  let top = topologies[top_ids[0]]
 
-  let one_top_id = top_ids[0]
-
-  let top = topologies[one_top_id]
-
+  let num_islands = top.num_islands
   let pop_size = top.population.len
+  assert pop_size mod num_islands == 0
+  let island_pop_size = pop_size div num_islands
 
   let hyper_params = selection_hyper_params.get(top.selection_hyper_params)
+  let num_selected_per_island = max(2, (hyper_params.frac_natural_selected * island_pop_size.float).int)
+  let tournament_size = min(num_selected_per_island, hyper_params.tournament_size)
 
-  let num_selected = max(2, (hyper_params.frac_natural_selected * pop_size.float).int)
+  assert tournament_size <= num_selected_per_island
+  assert island_pop_size > num_selected_per_island
 
-  let tournament_size = max(2, (hyper_params.tournament_frac * num_selected.float).int)
+  var all_selected_indices: seq[int] = @[]
+  var all_selected_fitnesses: seq[float32] = @[]
+  var all_parent_indices: Couples = @[]
+  var all_target_nn_ids: seq[int] = @[]
 
-  assert tournament_size <= num_selected
-  assert pop_size > num_selected
+  for island_id in 0 ..< num_islands:
+    let offset = island_id * island_pop_size
+    let island_fitnesses = fitnesses[offset ..< offset + island_pop_size]
 
-  # select
+    let sorted_indices = island_fitnesses
+      .to_tensor()
+      .argsort(order = SortOrder.Descending)
+      .to_flat_seq()
 
-  let sorted_indices = fitnesses
-    .to_tensor()
-    .argsort(order = SortOrder.Descending)
-    .to_flat_seq()
+    let selected_sorted_indices = sorted_indices[0..<num_selected_per_island]
+    let selected_sorted_fitnesses = selected_sorted_indices.map(index => island_fitnesses[index])
 
-  let selected_sorted_indices = sorted_indices[0..<num_selected]
+    let num_tournaments = island_pop_size - num_selected_per_island
+    let parent_indices = tournament(selected_sorted_fitnesses, num_tournaments, tournament_size)
 
-  # get fitnesses
+    all_selected_indices.add(selected_sorted_indices.map(idx => idx + offset))
+    all_selected_fitnesses.add(selected_sorted_fitnesses)
 
-  let selected_sorted_fitnesses = selected_sorted_indices.map(index => fitnesses[index])
+    for i in num_selected_per_island ..< island_pop_size:
+      all_target_nn_ids.add(offset + i)
 
-  let num_tournaments = pop_size - num_selected # replenish back to original population size, 1 child per tournament
+    for couple in parent_indices:
+      let ((p1_idx, p1_fit), (p2_idx, p2_fit)) = couple
+      let global_p1_idx = selected_sorted_indices[p1_idx] + offset
+      let global_p2_idx = selected_sorted_indices[p2_idx] + offset
+      all_parent_indices.add(((global_p1_idx, p1_fit), (global_p2_idx, p2_fit)))
 
-  # tournament to get parent pairs
+    for top_id in top_ids:
+      let top = topologies[top_id]
+      let selected = selected_sorted_indices.map(index => top.population[index + offset])
 
-  let parent_indices = tournament(selected_sorted_fitnesses, num_tournaments, tournament_size)
+      for i in 0 ..< num_selected_per_island:
+        top.population[offset + i] = selected[i]
 
-  # remove least fit for all top ids passed in
+      top.curr_pop_size = num_selected_per_island * num_islands
 
-  for top_id in top_ids:
-    let top = topologies[top_id]
-
-    let selected = selected_sorted_indices.map(index => top.population[index])
-
-    for i in 0 ..< num_selected:
-      top.population[i] = selected[i]
-
-    top.curr_pop_size = num_selected
-
-  return (selected_sorted_indices, selected_sorted_fitnesses, parent_indices)
+  return (all_selected_indices, all_selected_fitnesses, all_parent_indices, all_target_nn_ids)
 
 proc mutate(
   top: Topology,
@@ -1204,217 +1153,131 @@ proc mutate(
   # mutating nodes
 
   for local_node_id in 0 ..< meta_nodes_len:
-
     let meta_node = nn.meta_nodes[local_node_id]
-
-    if meta_node.disabled:
-      continue
-
-    # maybe grow a new module
-
-    if satisfy_prob(hparams.grow_node_prob):
-      let meta_node_global_id = meta_node.node_id
-
-      # create the new node
-
-      let new_node_id = add_node(top)
-
-      let new_meta_node = MetaNode(
-        topology_id: top.id,
-        node_id: new_node_id,
-        can_disable: true,
-        disabled: false,
-        activation: if coin_flip(): relu else: sigmoid,
-        can_change_activation: coin_flip(),
-      )
-
-      let new_local_node_id = nn.meta_nodes.len
-
-      node_index[new_node_id] = new_local_node_id
-      nn.meta_nodes.add(new_meta_node)
-
-      # connections, afferent and efferent
-
-      var new_edge_ids: seq[int] = @[]
-
-      for node_from_to_id, edge_id in snapshot_conn_index.pairs:
-        let (from_node_id, to_node_id) = node_from_to_id
-
-        # only if this individual has the prerequisite afferent and efferent neurons
-        # innovate the new edges for the module
-
-        if not (
-          node_index.has_key(from_node_id) and
-          node_index.has_key(to_node_id) and
-          edge_index.has_key(edge_id)
-        ):
-          continue
-
-        if nn.meta_edges[edge_index[edge_id]].disabled:
-          continue
-
-        if to_node_id == meta_node_global_id:
-          new_edge_ids.add(add_edge(top, from_node_id, new_node_id))
-        elif from_node_id == meta_node_global_id:
-          new_edge_ids.add(add_edge(top, new_node_id, to_node_id))
-
-      # add the meta edges
-
-      for new_edge_id in new_edge_ids:
-        let edge = top.edges[new_edge_id]
-
-        let new_meta_edge = MetaEdge(
-          topology_id: top.id,
-          edge_id: new_edge_id,
-          local_from_node_id: node_index[edge.from_node_id],
-          local_to_node_id: node_index[edge.to_node_id],
-          weight: random_normal()
-        )
-
-        nn.meta_edges.add(new_meta_edge)
-      
-    # toggling disable flag on meta node
-
+    if meta_node.disabled: continue
     if meta_node.can_disable and satisfy_prob(hparams.add_remove_node_prob):
       meta_node.disabled = meta_node.disabled xor true
-
-    # mutating an activation on a node
-
     if meta_node.can_change_activation and satisfy_prob(hparams.change_activation_prob):
       meta_node.activation = rand_activation()
-
-    # mutating bias
-
     if satisfy_prob(hparams.change_node_bias_prob):
       if satisfy_prob(hparams.replace_node_bias_prob):
         meta_node.bias = random_normal()
       else:
         meta_node.bias += random_normal() * hparams.perturb_bias_strength
+      meta_node.bias = max(min(meta_node.bias, hparams.max_weight_magnitude), -hparams.max_weight_magnitude)
 
   # mutating edges
 
   for meta_edge_index in 0 ..< meta_edges_len:
-
     let meta_edge = nn.meta_edges[meta_edge_index]
-
-    # changing a weight
-
-    if meta_edge.disabled:
-      continue
-
+    if meta_edge.disabled: continue
     if satisfy_prob(hparams.change_edge_weight_prob):
-
       if satisfy_prob(hparams.replace_edge_weight_prob):
         meta_edge.weight = random_normal()
       else:
         meta_edge.weight += random_normal() * hparams.perturb_weight_strength
+      meta_edge.weight = max(min(meta_edge.weight, hparams.max_weight_magnitude), -hparams.max_weight_magnitude)
+    if not (satisfy_prob(hparams.toggle_meta_edge_prob) and meta_edge.can_disable): continue
+    meta_edge.disabled = meta_edge.disabled xor true
+    if not meta_edge.disabled: meta_edge.weight = random_normal()
 
-    # maybe splitting an edge
-    # this is the novel mutation introduced in the original NEAT paper
+  # structural mutations - fired ONCE per individual, not per node/edge
 
-    if satisfy_prob(hparams.grow_edge_prob):
+  if satisfy_prob(hparams.grow_node_prob):
+    var active_nodes: seq[int] = @[]
+    for i in 0 ..< meta_nodes_len:
+      if not nn.meta_nodes[i].disabled: active_nodes.add(i)
+    if active_nodes.len > 0:
+      let meta_node = nn.meta_nodes[sample(active_nodes)]
+      let meta_node_global_id = meta_node.node_id
+      let new_node_id = add_node(top)
+      let new_meta_node = MetaNode(
+        topology_id: top.id, node_id: new_node_id, can_disable: true, disabled: false,
+        activation: if coin_flip(): relu else: sigmoid, can_change_activation: coin_flip(),
+      )
+      let new_local_node_id = nn.meta_nodes.len
+      node_index[new_node_id] = new_local_node_id
+      nn.meta_nodes.add(new_meta_node)
 
-      # disable the edge
+      var new_edge_ids: seq[int] = @[]
+      for node_from_to_id, edge_id in snapshot_conn_index.pairs:
+        let (from_node_id, to_node_id) = node_from_to_id
+        if not (node_index.has_key(from_node_id) and node_index.has_key(to_node_id) and edge_index.has_key(edge_id)): continue
+        if nn.meta_edges[edge_index[edge_id]].disabled: continue
+        if to_node_id == meta_node_global_id: new_edge_ids.add(add_edge(top, from_node_id, new_node_id))
+        elif from_node_id == meta_node_global_id: new_edge_ids.add(add_edge(top, new_node_id, to_node_id))
 
+      for new_edge_id in new_edge_ids:
+        let edge = top.edges[new_edge_id]
+        nn.meta_edges.add(MetaEdge(
+          topology_id: top.id, edge_id: new_edge_id, local_from_node_id: node_index[edge.from_node_id],
+          local_to_node_id: node_index[edge.to_node_id], weight: random_normal()
+        ))
+
+  if satisfy_prob(hparams.grow_edge_prob):
+    var active_edges: seq[int] = @[]
+    for i in 0 ..< meta_edges_len:
+      if not nn.meta_edges[i].disabled: active_edges.add(i)
+    if active_edges.len > 0:
+      let meta_edge = nn.meta_edges[sample(active_edges)]
       meta_edge.disabled = true
-
-      # add a new innovated node
-
-      let node_id = add_node(top)
-
-      # add the two innovated edges, with the new node above in between
-
       let edge = top.edges[meta_edge.edge_id]
 
-      let edge_id1 = add_edge(top, edge.from_node_id, node_id)
-      let edge_id2 = add_edge(top, node_id, edge.to_node_id)
-
-      # now add the meta nodes and edges for this particular neural network instantiation
-
-      let meta_node = MetaNode(
-        topology_id: top.id,
-        node_id: node_id,
-        activation: if coin_flip(): relu else: sigmoid,
-        can_change_activation: coin_flip(),
-      )
+      var node_id: int
+      var edge_id1: int
+      var edge_id2: int
+      if top.edge_splits.has_key(meta_edge.edge_id):
+        let split_info = top.edge_splits[meta_edge.edge_id]
+        node_id = split_info[0]; edge_id1 = split_info[1]; edge_id2 = split_info[2]
+      else:
+        node_id = add_node(top)
+        edge_id1 = add_edge(top, edge.from_node_id, node_id)
+        edge_id2 = add_edge(top, node_id, edge.to_node_id)
+        top.edge_splits[meta_edge.edge_id] = (node_id, edge_id1, edge_id2)
 
       let new_local_node_id = nn.meta_nodes.len
-      nn.meta_nodes.add(meta_node)
+      nn.meta_nodes.add(MetaNode(
+        topology_id: top.id, node_id: node_id,
+        activation: if coin_flip(): relu else: sigmoid, can_change_activation: coin_flip(),
+      ))
+      node_index[node_id] = new_local_node_id
 
-      let meta_edge_incoming = MetaEdge(
-        topology_id: top.id,
-        edge_id: edge_id1,
-        local_from_node_id: meta_edge.local_from_node_id,
-        local_to_node_id: new_local_node_id,
-        weight: 1.0 # they initialize to 1.
-      )
-
-      nn.meta_edges.add(meta_edge_incoming)
-
-      let meta_edge_outgoing = MetaEdge(
-        topology_id: top.id,
-        edge_id: edge_id2,
-        local_from_node_id: new_local_node_id,
-        local_to_node_id: meta_edge.local_to_node_id,
-        weight: meta_edge.weight # inherits old weight
-      )
-
-      nn.meta_edges.add(meta_edge_outgoing)
-
-    # toggling an existing edge gene in the individual
-
-    if not (satisfy_prob(hparams.toggle_meta_edge_prob) and meta_edge.can_disable):
-      continue
-
-    meta_edge.disabled = meta_edge.disabled xor true
-    if not meta_edge.disabled:
-      meta_edge.weight = random_normal()
-
-  # adding of a novel edge to the gene pool + the individual
+      nn.meta_edges.add(MetaEdge(
+        topology_id: top.id, edge_id: edge_id1, local_from_node_id: meta_edge.local_from_node_id,
+        local_to_node_id: new_local_node_id, weight: 1.0
+      ))
+      nn.meta_edges.add(MetaEdge(
+        topology_id: top.id, edge_id: edge_id2, local_from_node_id: new_local_node_id,
+        local_to_node_id: meta_edge.local_to_node_id, weight: meta_edge.weight
+      ))
 
   if satisfy_prob(hparams.add_novel_edge_prob):
-    let existing_node_ids = node_index.keys
-      .to_seq
-      .filter(node_id => not nn.meta_nodes[node_index[node_id]].disabled)
+    var active_nodes: seq[int] = @[]
+    for i in 0 ..< nn.meta_nodes.len:
+      if not nn.meta_nodes[i].disabled: active_nodes.add(i)
+      
+    if active_nodes.len > 1:
+      let from_local = sample(active_nodes)
+      var to_local = sample(active_nodes)
+      var attempts = 0
+      while from_local == to_local and attempts < 10:
+        to_local = sample(active_nodes)
+        attempts += 1
+        
+      if from_local != to_local:
+        let from_global = nn.meta_nodes[from_local].node_id
+        let to_global = nn.meta_nodes[to_local].node_id
+        let rct = (from_global, to_global)
+        let edge_id = if not top.conn_index.has_key(rct): add_edge(top, from_global, to_global) else: top.conn_index[rct]
 
-    let cartesian_prod = product(@[existing_node_ids, existing_node_ids]).filter(pair => pair[0] != pair[1])
-
-    let random_conn = sample(cartesian_prod)
-    let (from_node_id, to_node_id) = (random_conn[0], random_conn[1])
-
-    let random_conn_tuple = (from_node_id, to_node_id)
-
-    let exists_in_gene_pool = top.conn_index.has_key(random_conn_tuple)
-
-    # register novel edge in gene pool if not exists
-
-    let edge_id = if not exists_in_gene_pool:
-      add_edge(top, from_node_id, to_node_id)
-    else:
-      top.conn_index[random_conn_tuple]
-
-    # # now add it to the individual
-
-    let meta_edge = if not edge_index.has_key(edge_id):
-      let new_meta_edge = MetaEdge(
-        topology_id: top.id,
-        edge_id: edge_id,
-        local_from_node_id: node_index[from_node_id],
-        local_to_node_id: node_index[to_node_id],
-        weight: random_normal()
-      )
-
-      edge_index[edge_id] = nn.meta_edges.len
-      nn.meta_edges.add(new_meta_edge)
-
-      new_meta_edge
-    else:
-      nn.meta_edges[edge_index[edge_id]]
-
-    meta_edge.disabled = false
-
-  # just remove cached trace for now
-  # properly detect change in future
+        if not edge_index.has_key(edge_id):
+          nn.meta_edges.add(MetaEdge(
+            topology_id: top.id, edge_id: edge_id, local_from_node_id: from_local,
+            local_to_node_id: to_local, weight: random_normal()
+          ))
+          edge_index[edge_id] = nn.meta_edges.len - 1
+        else:
+          nn.meta_edges[edge_index[edge_id]].disabled = false
 
   nn.cached_exec_trace = none(ExecTrace)
 
@@ -1663,18 +1526,134 @@ proc crossover_one_couple_and_add_to_population(
 
 proc crossover_and_add_to_population(
   top_ids: seq[int],
-  couples: seq[((int, float32), (int, float32))],
+  couples: seq[Couple],
+  target_nn_ids: seq[int] = @[],
   crossover_hyper_params: Option[CrossoverHyperParams] = CrossoverHyperParams.none
 ) {.exportpy.} =
 
   for top_id in top_ids:
     let top = topologies[top_id]
 
-    for item in zip(couples, (top.curr_pop_size ..< top.pop_size).to_seq):
-      let (couple, nn_id) = item
-      crossover_one_couple_and_add_to_population(top, nn_id, couple, crossover_hyper_params)
+    if target_nn_ids.len > 0:
+      assert target_nn_ids.len == couples.len
+      for i in 0 ..< couples.len:
+        let couple = couples[i]
+        let nn_id = target_nn_ids[i]
+        crossover_one_couple_and_add_to_population(top, nn_id, couple, crossover_hyper_params)
+    else:
+      for item in zip(couples, (top.curr_pop_size ..< top.pop_size).to_seq):
+        let (couple, nn_id) = item
+        crossover_one_couple_and_add_to_population(top, nn_id, couple, crossover_hyper_params)
 
     top.curr_pop_size = top.pop_size
+
+# migration and island reset
+
+proc clone*(nn: NeuralNetwork): NeuralNetwork =
+  var cloned_nodes: seq[MetaNode] = @[]
+  for node in nn.meta_nodes:
+    let new_node = MetaNode()
+    new_node[] = node[]
+    cloned_nodes.add(new_node)
+
+  var cloned_edges: seq[MetaEdge] = @[]
+  for edge in nn.meta_edges:
+    let new_edge = MetaEdge()
+    new_edge[] = edge[]
+    cloned_edges.add(new_edge)
+
+  return NeuralNetwork(
+    id: nn.id,
+    topology_id: nn.topology_id,
+    num_inputs: nn.num_inputs,
+    num_outputs: nn.num_outputs,
+    num_hiddens: nn.num_hiddens,
+    meta_nodes: cloned_nodes,
+    meta_edges: cloned_edges,
+    cached_exec_trace: none(ExecTrace),
+  )
+
+proc migrate_islands*(
+  all_top_ids: seq[int],
+  num_migrants: int
+) {.exportpy.} =
+  if all_top_ids.len > 0:
+    let first_top = topologies[all_top_ids[0]]
+    let num_islands = first_top.num_islands
+    if num_islands > 1:
+      let pop_size = first_top.pop_size
+      let island_pop_size = pop_size div num_islands
+
+      if num_migrants < island_pop_size:
+        for top_id in all_top_ids:
+          let top = topologies[top_id]
+          var new_pop = new_seq[NeuralNetwork](pop_size)
+
+          for i in 0 ..< num_islands:
+            let curr_offset = i * island_pop_size
+            let prev_island = (i + num_islands - 1) mod num_islands
+            let prev_offset = prev_island * island_pop_size
+
+            for j in 0 ..< island_pop_size:
+              new_pop[curr_offset + j] = top.population[curr_offset + j]
+
+            for j in 0 ..< num_migrants:
+              new_pop[curr_offset + island_pop_size - 1 - j] = top.population[prev_offset + j].clone()
+
+          top.population = new_pop
+
+proc reset_top_islands*(
+  all_top_ids: seq[int],
+  fitnesses: seq[float32],
+  num_islands_to_reset: int,
+  tournament_size: int
+) {.exportpy.} =
+  if all_top_ids.len > 0:
+    let first_top = topologies[all_top_ids[0]]
+    let num_islands = first_top.num_islands
+    if num_islands > 1:
+      let pop_size = first_top.pop_size
+      let island_pop_size = pop_size div num_islands
+
+      var island_avgs: seq[(float32, int)] = @[]
+      for i in 0 ..< num_islands:
+        let offset = i * island_pop_size
+        let island_fits = fitnesses[offset ..< offset + island_pop_size]
+        var sum: float32 = 0.0
+        for f in island_fits: sum += f
+        island_avgs.add((sum / island_pop_size.float32, i))
+
+      island_avgs.sort(proc (x, y: (float32, int)): int = cmp(x[0], y[0]))
+
+      let reset_island_ids = island_avgs[0 ..< num_islands_to_reset].map(x => x[1])
+      let survivor_island_ids = island_avgs[num_islands_to_reset .. ^1].map(x => x[1])
+
+      var global_survivor_indices: seq[int] = @[]
+      for island_id in survivor_island_ids:
+        let offset = island_id * island_pop_size
+        for j in 0 ..< island_pop_size:
+          global_survivor_indices.add(offset + j)
+
+      for island_id in reset_island_ids:
+        let offset = island_id * island_pop_size
+
+        for nn_id in offset ..< offset + island_pop_size:
+          var p1, p2: int = -1
+          var f1, f2: float32 = -1e10
+
+          for _ in 0 ..< tournament_size:
+            let idx = global_survivor_indices[rand(global_survivor_indices.len - 1)]
+            let fit = fitnesses[idx]
+            if fit > f1:
+              p2 = p1; f2 = f1
+              p1 = idx; f1 = fit
+            elif fit > f2:
+              p2 = idx; f2 = fit
+
+          for top_id in all_top_ids:
+            let top = topologies[top_id]
+            let child = crossover(top, p1, p2, f1, f2)
+            top.population[nn_id] = child
 
 # quick test
 
@@ -1689,8 +1668,8 @@ when is_main_module:
   assert top.population.len == 10
 
   for i in 0..<100:
-    let (_, _, couples) = select_and_tournament(@[hyperneat_top_id], @[1.0'f32, 2.0, 3.0, 5.0, 4.0, 2.0, 3.0, 1.0, 2.0, 3.0])
-    crossover_and_add_to_population(@[hyperneat_top_id], couples)
+    let (_, _, couples, target_nn_ids) = select_and_tournament(@[hyperneat_top_id], @[1.0'f32, 2.0, 3.0, 5.0, 4.0, 2.0, 3.0, 1.0, 2.0, 3.0])
+    crossover_and_add_to_population(@[hyperneat_top_id], couples, target_nn_ids)
     mutate_all(@[hyperneat_top_id])
 
   save_json_to_file(hyperneat_top_id, "./population.json")

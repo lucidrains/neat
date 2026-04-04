@@ -1,3 +1,6 @@
+recorded-populations/
+population.json
+
 .DS_Store
 recordings/
 neat_nim

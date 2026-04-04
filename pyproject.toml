@@ -1,7 +1,7 @@
 [project]
-name = "neat"
+name = "x-neat"
 version = "0.0.1"
-description = "(Hyper)NEAT"
+description = "NEAT"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
 ]
