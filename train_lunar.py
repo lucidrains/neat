@@ -1,21 +1,32 @@
 # /// script
-# requires = [
+# requires-python = ">=3.10"
+# dependencies = [
+#     "x-neat",
 #     "gymnasium[box2d]",
-#     "numpy",
+#     "numpy>=2.2.5",
 #     "tqdm",
-#     "wandb",
+#     "wandb[media]",
 #     "fire",
-#     "nimporter",
+#     "box2d-py",
+#     "swig",
+#     "moviepy>=1.0.3",
 # ]
+#
+# [tool.uv.sources]
+# x-neat = { path = "." }
 # ///
 
+import fire
+from pathlib import Path
 from shutil import rmtree
-import numpy as np
 from random import randrange
+
+import numpy as np
+
 from tqdm import tqdm
+
 import gymnasium as gym
 import wandb
-import fire
 
 from neat.neat import NEAT
 
@@ -90,6 +101,9 @@ def train(
     recorded_population_folder: str = './recorded-populations',
     wandb_online: bool = False
 ):
+
+    print(f'\nrecordings will be saved to {Path(recording_folder).resolve()}, every {record_every} generations\n')
+
     run_name = f'neat-{pop_size}'
 
     # hyperparams dictionaries

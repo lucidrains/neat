@@ -35,10 +35,11 @@ def default(v, d):
 
 # sampling
 
-def gumbel_sample(t, temperature = 1.):
+def gumbel_sample(t, temperature = 1., eps = 1e-20):
     if temperature > 0.:
         t = t / temperature
-        t = t - np.log(-np.log(np.random.uniform(1e-20, 1.0, t.shape).astype(np.float32)))
+        u = np.random.uniform(0., 1., t.shape).astype(np.float32).clip(eps, 1. - eps)
+        t = t - np.log(-np.log(u))
 
     return t.argmax(axis = -1).tolist()
 
