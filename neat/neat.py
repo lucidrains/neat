@@ -33,13 +33,16 @@ def exists(v):
 def default(v, d):
     return v if exists(v) else d
 
+def log(t, eps = 1e-20):
+    return np.log(np.clip(t, a_min = eps, a_max = None))
+
 # sampling
 
 def gumbel_sample(t, temperature = 1., eps = 1e-20):
     if temperature > 0.:
         t = t / temperature
         u = np.random.uniform(0., 1., t.shape).astype(np.float32).clip(eps, 1. - eps)
-        t = t - np.log(-np.log(u))
+        t = t - log(-log(u, eps), eps)
 
     return t.argmax(axis = -1).tolist()
 

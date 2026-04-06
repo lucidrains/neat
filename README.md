@@ -2,6 +2,14 @@
 
 Explorations into NEAT and some of its derivative research
 
+## install
+
+In project root, run
+
+```bash
+$ sh install.sh
+```
+
 ## quick test
 
 ```bash
