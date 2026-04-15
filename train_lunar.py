@@ -62,7 +62,7 @@ def train(
     # selection parameters
     frac_natural_selected: float = 0.15,
     tournament_size: int = 3,
-    use_queen_bee: bool = False,
+    use_queen_bee: bool = True,
     queen_strong_mutation_rate: float = 0.25,
 
     # island parameters
