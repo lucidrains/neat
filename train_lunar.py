@@ -62,8 +62,6 @@ def train(
     # selection parameters
     frac_natural_selected: float = 0.15,
     tournament_size: int = 3,
-    use_queen_bee: bool = True,
-    queen_strong_mutation_rate: float = 0.25,
 
     # island parameters
     num_islands: int = 5,
@@ -110,9 +108,7 @@ def train(
 
     selection_hyper_params = dict(
         frac_natural_selected = frac_natural_selected,
-        tournament_size = tournament_size,
-        use_queen_bee = use_queen_bee,
-        queen_strong_mutation_rate = queen_strong_mutation_rate
+        tournament_size = tournament_size
     )
 
     mutation_hyper_params = dict(

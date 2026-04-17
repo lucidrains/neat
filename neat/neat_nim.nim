@@ -201,8 +201,6 @@ type
   SelectionHyperParams = object
     frac_natural_selected: float = 0.5
     tournament_size: int = 3
-    use_queen_bee: bool = false
-    queen_strong_mutation_rate: float = 0.25
 
   CrossoverHyperParams = object
     prob_child_disabled_given_parent_cond: float = 0.75
@@ -1111,14 +1109,9 @@ proc select_and_tournament(
     for couple in parent_indices:
       let ((p1_idx, p1_fit), (p2_idx, p2_fit)) = couple
       let global_p1_idx = selected_sorted_indices[p1_idx] + offset
-      var global_p2_idx = selected_sorted_indices[p2_idx] + offset
-      var final_p2_fit = p2_fit
+      let global_p2_idx = selected_sorted_indices[p2_idx] + offset
 
-      if hyper_params.use_queen_bee:
-        global_p2_idx = selected_sorted_indices[0] + offset
-        final_p2_fit = selected_sorted_fitnesses[0]
-
-      all_parent_indices.add(((global_p1_idx, p1_fit), (global_p2_idx, final_p2_fit)))
+      all_parent_indices.add(((global_p1_idx, p1_fit), (global_p2_idx, p2_fit)))
 
     for top_id in top_ids:
       let top = topologies[top_id]
@@ -1544,24 +1537,8 @@ proc crossover_one_couple_and_add_to_population(
   let (parent1, fitness1) = parent1_info
   let (parent2, fitness2) = parent2_info
   
-  let sel_params = top.selection_hyper_params
-
-  if sel_params.use_queen_bee:
-    let drone_clone = crossover(top, parent1, parent1, fitness1, fitness1, crossover_hyper_params)
-    top.population[nn_id] = drone_clone
-
-    var strong_mut = top.mutation_hyper_params
-    strong_mut.mutate_prob = 1.0
-    strong_mut.change_edge_weight_prob = min(1.0, strong_mut.change_edge_weight_prob + sel_params.queen_strong_mutation_rate)
-    strong_mut.replace_edge_weight_prob = min(1.0, strong_mut.replace_edge_weight_prob + sel_params.queen_strong_mutation_rate)
-    
-    mutate(top, nn_id, strong_mut.some)
-
-    let final_child = crossover(top, nn_id, parent2, fitness1, fitness2, crossover_hyper_params)
-    top.population[nn_id] = final_child
-  else:
-    let child = crossover(top, parent1, parent2, fitness1, fitness2, crossover_hyper_params)
-    top.population[nn_id] = child
+  let child = crossover(top, parent1, parent2, fitness1, fitness2, crossover_hyper_params)
+  top.population[nn_id] = child
 
 proc crossover_one_couple_and_add_to_population(
   top_id: int,
