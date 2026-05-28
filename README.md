@@ -88,12 +88,12 @@ $ uv run train_lunar.py
 
 ```bibtex
 @misc{doerr2017fastgeneticalgorithms,
-    title   = {Fast Genetic Algorithms}, 
+    title   = {Fast Genetic Algorithms},
     author  = {Benjamin Doerr and Huu Phuoc Le and Régis Makhmara and Ta Duy Nguyen},
     year    = {2017},
     eprint  = {1703.03334},
     archivePrefix = {arXiv},
     primaryClass = {cs.NE},
-    url     = {https://arxiv.org/abs/1703.03334}, 
+    url     = {https://arxiv.org/abs/1703.03334},
 }
 ```

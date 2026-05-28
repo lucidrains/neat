@@ -22,7 +22,8 @@ from neat.neat_nim import (
     evaluate_nn_single,
     evaluate_population,
     get_topology_info,
-    save_json_to_file
+    save_json_to_file,
+    get_population_complexities
 )
 
 # functions
@@ -35,6 +36,9 @@ def default(v, d):
 
 def log(t, eps = 1e-20):
     return np.log(np.clip(t, a_min = eps, a_max = None))
+
+def bernoulli(p):
+    return np.random.binomial(1, p)
 
 # sampling
 
@@ -96,19 +100,29 @@ class GeneticAlgorithm:
 
     def genetic_algorithm_step(
         self,
-        fitnesses: Array,
+        fitnesses,
         selection_hyper_params = None,
         mutation_hyper_params = None,
         crossover_hyper_params = None,
         migrate_num = 0,
         reset_islands_num = 0,
-        reset_islands_tournament_size = 3
+        reset_islands_tournament_size = 3,
+        prob_weigh_complexity_as_fitness: float = 0.0,
+        simplicity_weight: float = 1.0,
+        eps: float = 1e-8
     ):
 
         # 1. selection
         # 2. tournament -> parent pairs
 
-        fitnesses_list = fitnesses.tolist()
+        weigh_complexity_as_fitness = bernoulli(prob_weigh_complexity_as_fitness)
+
+        if weigh_complexity_as_fitness:
+            complexities = np.array(get_population_complexities(self.all_top_ids[0]))
+            simplicity_fitness_score = 1.0 / (complexities + eps)
+            fitnesses_list = (fitnesses + simplicity_weight * simplicity_fitness_score).tolist()
+        else:
+            fitnesses_list = fitnesses.tolist()
 
         (
             sel_indices,

@@ -292,6 +292,22 @@ proc get_topology_info(
   result.total_innovated_nodes = top.node_innovation_id.load + 1
   result.total_innovated_edges = top.edge_innovation_id.load + 1
 
+proc get_population_complexities(
+  top_id: int
+): seq[float32] {.exportpy.} =
+
+  let top = topologies[top_id]
+
+  result = new_seq[float32]()
+
+  for nn in top.population:
+    var complexity = 0
+    for node in nn.meta_nodes:
+      if not node.disabled: complexity += 1
+    for edge in nn.meta_edges:
+      if not edge.disabled: complexity += 1
+    result.add(complexity.float32)
+
 # saving population to pretty json for introspecting on evolved graphs
 
 proc skip_hook*(T: typedesc[NeuralNetwork], key: static string): bool =

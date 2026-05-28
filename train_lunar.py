@@ -29,6 +29,7 @@ import gymnasium as gym
 import wandb
 
 from neat.neat import NEAT
+from neat.neat_nim import get_population_complexities
 
 # helpers
 
@@ -62,6 +63,7 @@ def train(
     # selection parameters
     frac_natural_selected: float = 0.15,
     tournament_size: int = 3,
+    prob_weigh_complexity_as_fitness: float = 0.05,
 
     # island parameters
     num_islands: int = 5,
@@ -88,11 +90,14 @@ def train(
     perturb_bias_strength: float = 0.2,
     num_preserve_elites: int = 2,
     max_weight_magnitude: float = 5.0,
-    
+
     # crossover parameters
     prob_child_disabled_given_parent_cond: float = 0.75,
     prob_remove_disabled_node: float = 0.01,
     prob_inherit_all_excess_genes: float = 1.0,
+
+    # simplicity regularizer
+    simplicity_weight: float = 1.0,
 
     # system
     recording_folder: str = './recordings',
@@ -262,30 +267,33 @@ def train(
 
         population.genetic_algorithm_step(
             fitnesses,
+            selection_hyper_params = selection_hyper_params,
+            mutation_hyper_params = mutation_hyper_params,
+            crossover_hyper_params = crossover_hyper_params,
             migrate_num = _migrate_num,
-            reset_islands_num = _reset_islands_num
+            reset_islands_num = _reset_islands_num,
+            prob_weigh_complexity_as_fitness = prob_weigh_complexity_as_fitness,
+            simplicity_weight = simplicity_weight
         )
 
         # logging
-        
-        max_fit = fitnesses.max()
-        mean_fit = fitnesses.mean()
-
-        log = dict(
-            max_fitness = max_fit,
-            mean_pop_fitness = mean_fit,
-        )
-
-        desc = f'fitness: max {max_fit:.2f} | mean {mean_fit:.2f}'
 
         stats = population.stats()[0]
         nodes = stats['total_innovated_nodes']
         edges = stats['total_innovated_edges']
-        log.update(stats)
-        desc = f'N: {nodes} E: {edges} | {desc}'
 
-        wandb.log(log)
-        pbar.set_description(desc)
+        mean_complexity = np.array(get_population_complexities(population.all_top_ids[0])).mean()
+        max_fit = fitnesses.max()
+        mean_fit = fitnesses.mean()
+
+        wandb.log({
+            'max_fitness': max_fit,
+            'mean_pop_fitness': mean_fit,
+            'mean_complexity': mean_complexity,
+            **stats
+        })
+
+        pbar.set_description(f'C: {mean_complexity:.1f} | N: {nodes} E: {edges} | fitness: max {max_fit:.2f} | mean {mean_fit:.2f}')
 
         if divisible_by(gen + 1, record_every):
             record_agent_(0)
