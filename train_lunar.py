@@ -102,7 +102,8 @@ def train(
     # system
     recording_folder: str = './recordings',
     recorded_population_folder: str = './recorded-populations',
-    wandb_online: bool = False
+    wandb_online: bool = False,
+    continuous: bool = False
 ):
 
     print(f'\nrecordings will be saved to {Path(recording_folder).resolve()}, every {record_every} generations\n')
@@ -154,10 +155,12 @@ def train(
     wandb.init(project = 'lunar-neat', mode = 'disabled' if not wandb_online else 'online')
     wandb.run.name = run_name
 
+    env_name = "LunarLanderContinuous-v3" if continuous else "LunarLander-v3"
+
     # environments
 
     envs = gym.make_vec(
-        "LunarLander-v3",
+        env_name,
         num_envs = pop_size,
         vectorization_mode = 'sync'
     )
@@ -168,7 +171,7 @@ def train(
     rmtree(recorded_population_folder, ignore_errors = True)
 
     rec_env = gym.make(
-        "LunarLander-v3",
+        env_name,
         render_mode = 'rgb_array'
     )
 
@@ -191,7 +194,9 @@ def train(
         state, _ = rec_env.reset(seed = seed)
 
         while True:
-            actions_to_env = population.single_forward(policy_index, state, sample = True)
+            actions_to_env = population.single_forward(policy_index, state, sample = not continuous)
+            actions_to_env = np.clip(actions_to_env, -1.0, 1.0) if continuous else actions_to_env
+
             next_state, _, truncated, terminated, *_ = rec_env.step(actions_to_env)
             state = next_state
 
@@ -210,7 +215,7 @@ def train(
     # set up population
 
     dim_state = envs.observation_space.shape[-1]
-    num_actions = 4
+    num_actions = 2 if continuous else 4
 
     population = NEAT(
         dim_state, num_actions,
@@ -240,7 +245,9 @@ def train(
             time = 0
 
             while True:
-                actions_to_env = population.forward(state, sample = True)
+                actions_to_env = population.forward(state, sample = not continuous)
+                actions_to_env = np.clip(actions_to_env, -1.0, 1.0) if continuous else actions_to_env
+
                 next_state, reward, truncated, terminated, *_ = envs.step(actions_to_env)
 
                 is_done_this_step = truncated | terminated
