@@ -20,6 +20,7 @@ from neat.neat_nim import (
     migrate_islands as migrate_nim,
     reset_top_islands as reset_islands_nim,
     evaluate_nn_single,
+    backprop_nn_single,
     evaluate_population,
     get_topology_info,
     save_json_to_file,
@@ -202,3 +203,18 @@ class NEAT(GeneticAlgorithm):
             return self.output
 
         return gumbel_sample(self.output, temperature = temperature)
+
+    def backprop(
+        self,
+        index: int,
+        state,
+        target,
+        learning_rate: float = 0.01
+    ):
+        backprop_nn_single(
+            self.top.id,
+            index,
+            state.tolist(),
+            target.tolist(),
+            learning_rate
+        )

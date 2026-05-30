@@ -143,6 +143,7 @@ type
   WeightUpdate = tuple
     weight: float32
     from_node_id: int
+    meta_edge_index: int
 
   NodeUpdate = tuple
     to_node_id: int
@@ -763,7 +764,7 @@ proc evaluate_nn_exec_trace(
       i,
       input_node.activation.ord,
       0.0'f32,
-      @[(1.0'f32, node_index)]
+      @[(1.0'f32, node_index, -1)]
     ))
 
   # proc for fetching value of node at a given meta node index
@@ -786,9 +787,9 @@ proc evaluate_nn_exec_trace(
 
     # find all edges
 
-    var input_node_index_and_weight: seq[(float32, int)] = @[] # omit visited
+    var input_node_index_and_weight: seq[(float32, int, int)] = @[] # omit visited
 
-    for meta_edge in nn.meta_edges:
+    for meta_edge_index, meta_edge in nn.meta_edges:
       if meta_edge.disabled:
         continue
 
@@ -809,16 +810,16 @@ proc evaluate_nn_exec_trace(
       if meta_node.disabled:
         continue
 
-      input_node_index_and_weight.add((meta_edge.weight, local_from_node_id))
+      input_node_index_and_weight.add((meta_edge.weight, local_from_node_id, meta_edge_index))
 
     # get weighted sum of inputs to the node
 
-    var multiplies: seq[(float32, int)] = @[]
+    var multiplies: seq[(float32, int, int)] = @[]
 
     for entry in input_node_index_and_weight:
-      let (weight, local_from_node_id) = entry
+      let (weight, local_from_node_id, meta_edge_index) = entry
       compute_node_value(local_from_node_id, next_visited, trace)
-      multiplies.add((weight, local_from_node_id))
+      multiplies.add((weight, local_from_node_id, meta_edge_index))
 
     # activation
 
@@ -874,7 +875,7 @@ proc evaluate_nn_with_trace(
     values[to_id] = values[to_id] +. bias
 
     for incoming_weight in incoming_weights:
-      let (weight, from_id) = incoming_weight
+      let (weight, from_id, _) = incoming_weight
       values[to_id] += weight * values[from_id]
 
     values[to_id] = Activation(act_index).activate(values[to_id])
@@ -933,7 +934,7 @@ proc evaluate_nn_single_with_trace_thread_fn(
     var current_val = bias
 
     for incoming_weight in incoming_weights:
-      let (weight, from_id) = incoming_weight
+      let (weight, from_id, _) = incoming_weight
       current_val += weight * thread_local_values[from_id]
 
     thread_local_values[to_id] = Activation(act_index).activate(current_val)
@@ -1035,6 +1036,79 @@ proc rand_activation(): Activation =
   let activations = Activation.to_seq
   let rand_activation_index = rand(Activation.high.ord)
   result = activations[rand_activation_index]
+
+proc d_activate(act: Activation, x: float32, y: float32): float32 =
+  case act
+  of identity: 1.0
+  of sigmoid:  y * (1.0 - y)
+  of tanh:     1.0 - y * y
+  of relu:     (if x > 0.0: 1.0'f32 else: 0.0'f32)
+  of clamp:    (if x >= -1.0 and x <= 1.0: 1.0'f32 else: 0.0'f32)
+  of elu:      (if x >= 0.0: 1.0'f32 else: y + 1.0)
+  of gauss:    -2.0 * x * y
+  of sin:      cos(x)
+  of abs:      (if x > 0.0: 1.0'f32 elif x < 0.0: -1.0'f32 else: 0.0'f32)
+
+proc backprop_nn_single*(
+  top_id: int,
+  nn_id: int,
+  inputs: seq[float32],
+  targets: seq[float32],
+  learning_rate: float32 = 0.01
+) {.exportpy.} =
+  let top = topologies[top_id]
+  let nn = top.population[nn_id]
+
+  if nn.cached_exec_trace.is_none:
+    nn.cached_exec_trace = evaluate_nn_exec_trace(top_id, nn_id).some
+
+  let et = nn.cached_exec_trace.get
+  let (num_inputs, num_outputs, num_nodes) = et.node_info
+
+  var values = new_seq[float32](num_nodes + num_inputs)
+  var pre_act = new_seq[float32](num_nodes + num_inputs)
+
+  for i in 0 ..< num_inputs:
+    values[num_nodes + i] = inputs[i]
+    pre_act[num_nodes + i] = inputs[i]
+
+  # forward
+
+  for node in et.node_updates:
+    var z = node.bias
+    for edge in node.trace:
+      z += edge.weight * values[edge.from_node_id]
+    pre_act[node.to_node_id] = z
+    values[node.to_node_id] = Activation(node.activation_id).activate(z)
+
+  # backward
+
+  var grad = new_seq[float32](num_nodes + num_inputs)
+
+  for i in 0 ..< num_outputs:
+    grad[num_inputs + i] = values[num_inputs + i] - targets[i]
+
+  for i in countdown(et.node_updates.high, 0):
+    template node: untyped = et.node_updates[i]
+
+    if node.to_node_id < num_inputs:
+      continue
+
+    let act = Activation(node.activation_id)
+    let g = grad[node.to_node_id] * d_activate(act, pre_act[node.to_node_id], values[node.to_node_id])
+
+    node.bias -= learning_rate * g
+    nn.meta_nodes[node.to_node_id].bias = node.bias
+
+    for j in 0 ..< node.trace.len:
+      template edge: untyped = et.node_updates[i].trace[j]
+
+      grad[edge.from_node_id] += g * edge.weight
+
+      if edge.meta_edge_index >= 0:
+        let w = edge.weight - learning_rate * g * values[edge.from_node_id]
+        edge.weight = w
+        nn.meta_edges[edge.meta_edge_index].weight = w
 
 # mutation and crossover
 
