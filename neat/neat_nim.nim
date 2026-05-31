@@ -200,6 +200,8 @@ type
   # hyperparams
 
   SelectionHyperParams = object
+    use_fuss: bool = false
+    fuss_eps: float = 1e-5
     frac_natural_selected: float = 0.5
     tournament_size: int = 3
 
@@ -507,7 +509,7 @@ proc init_nn(
     nn.meta_nodes.add(meta_node)
 
   # initial output nodes
-  
+
   for node in top.nodes[output_node_index_start..<(output_node_index_start + top.num_outputs)]:
 
     let meta_node = MetaNode(
@@ -849,7 +851,7 @@ proc evaluate_nn_exec_trace(
 ): ExecTrace {.exportpy.} =
 
   let top = topologies[top_id]
-  return evaluate_nn_exec_trace(top, nn_id)  
+  return evaluate_nn_exec_trace(top, nn_id)
 
 proc evaluate_nn_with_trace(
   trace_with_meta_info: ExecTrace,
@@ -1112,6 +1114,35 @@ proc backprop_nn_single*(
 
 # mutation and crossover
 
+proc fuss_couples*(fitnesses: seq[float32], num_couples: int, eps = 1e-5'f32): Couples =
+  let pop_size = fitnesses.len
+
+  var sorted = new_seq[(float32, int)](pop_size)
+  for i, f in fitnesses: sorted[i] = (f, i)
+  sorted.sort()
+
+  result = new_seq_of_cap[Couple](num_couples)
+
+  if pop_size == 1 or sorted[0][0] == sorted[^1][0]:
+    for _ in 0 ..< num_couples:
+      let p1 = rand(pop_size - 1)
+      let p2 = rand(pop_size - 1)
+      result.add(((p1, fitnesses[p1]), (p2, fitnesses[p2])))
+    return
+
+  var cdf = new_seq[float32](pop_size)
+  var sum = 0.0'f32
+  for i in 0 ..< pop_size:
+    let left = if i == 0: sorted[0][0] else: sorted[i-1][0]
+    let right = if i == pop_size - 1: sorted[^1][0] else: sorted[i+1][0]
+    sum += (right - left) / 2.0'f32 + eps
+    cdf[i] = sum
+
+  for _ in 0 ..< num_couples:
+    let p1 = sorted[lower_bound(cdf, rand(sum))][1]
+    let p2 = sorted[lower_bound(cdf, rand(sum))][1]
+    result.add(((p1, fitnesses[p1]), (p2, fitnesses[p2])))
+
 proc tournament*(
   fitnesses: seq[float32],
   num_tournaments: range[1..int.high],
@@ -1188,7 +1219,12 @@ proc select_and_tournament(
     let selected_sorted_fitnesses = selected_sorted_indices.map(index => island_fitnesses[index])
 
     let num_tournaments = island_pop_size - num_selected_per_island
-    let parent_indices = tournament(selected_sorted_fitnesses, num_tournaments, tournament_size)
+
+    var parent_indices: Couples
+    if hyper_params.use_fuss:
+      parent_indices = fuss_couples(selected_sorted_fitnesses, num_tournaments, hyper_params.fuss_eps.float32)
+    else:
+      parent_indices = tournament(selected_sorted_fitnesses, num_tournaments, tournament_size)
 
     all_selected_indices.add(selected_sorted_indices.map(idx => idx + offset))
     all_selected_fitnesses.add(selected_sorted_fitnesses)
@@ -1198,8 +1234,9 @@ proc select_and_tournament(
 
     for couple in parent_indices:
       let ((p1_idx, p1_fit), (p2_idx, p2_fit)) = couple
-      let global_p1_idx = selected_sorted_indices[p1_idx] + offset
-      let global_p2_idx = selected_sorted_indices[p2_idx] + offset
+
+      let global_p1_idx = p1_idx + offset
+      let global_p2_idx = p2_idx + offset
 
       all_parent_indices.add(((global_p1_idx, p1_fit), (global_p2_idx, p2_fit)))
 
@@ -1269,7 +1306,7 @@ proc mutate(
 
     if node.can_change_activation and satisfy_prob(hparams.change_activation_prob):
       node.activation = rand_activation()
-    
+
     if not hparams.use_fast_ga and satisfy_prob(hparams.change_node_bias_prob):
       perturb_value(node.bias, hparams.replace_node_bias_prob, hparams.perturb_bias_strength, hparams.max_weight_magnitude)
 
@@ -1372,7 +1409,7 @@ proc mutate(
     var active_nodes: seq[int] = @[]
     for i in 0 ..< nn.meta_nodes.len:
       if not nn.meta_nodes[i].disabled: active_nodes.add(i)
-      
+
     if active_nodes.len > 1:
       let from_local = sample(active_nodes)
       var to_local = sample(active_nodes)
@@ -1380,7 +1417,7 @@ proc mutate(
       while from_local == to_local and attempts < 10:
         to_local = sample(active_nodes)
         attempts += 1
-        
+
       if from_local != to_local:
         let from_global = nn.meta_nodes[from_local].node_id
         let to_global = nn.meta_nodes[to_local].node_id
@@ -1626,7 +1663,7 @@ proc crossover_one_couple_and_add_to_population(
   let (parent1_info, parent2_info) = couple
   let (parent1, fitness1) = parent1_info
   let (parent2, fitness2) = parent2_info
-  
+
   let child = crossover(top, parent1, parent2, fitness1, fitness2, crossover_hyper_params)
   top.population[nn_id] = child
 

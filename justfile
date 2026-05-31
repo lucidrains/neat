@@ -10,3 +10,9 @@ rebuild:
 
 test-xor: rebuild
 	python3 train_neat_xor.py
+
+compile:
+	nim c --app:lib -d:release --out:neat/neat_nim.so neat/neat_nim.nim
+
+train-lunar-fuss: compile
+	uv run train_lunar.py --use_fuss=True --fuss_eps=1e-5

@@ -64,6 +64,8 @@ def train(
     frac_natural_selected: float = 0.15,
     tournament_size: int = 3,
     prob_weigh_complexity_as_fitness: float = 0.05,
+    use_fuss: bool = False,
+    fuss_eps: float = 1e-5,
 
     # island parameters
     num_islands: int = 5,
@@ -114,7 +116,9 @@ def train(
 
     selection_hyper_params = dict(
         frac_natural_selected = frac_natural_selected,
-        tournament_size = tournament_size
+        tournament_size = tournament_size,
+        use_fuss = use_fuss,
+        fuss_eps = fuss_eps
     )
 
     mutation_hyper_params = dict(

@@ -97,3 +97,15 @@ $ uv run train_lunar.py
     url     = {https://arxiv.org/abs/1703.03334},
 }
 ```
+
+```bibtex
+@misc{legg2004tournamentversusfitnessuniform,
+    title   = {Tournament versus Fitness Uniform Selection},
+    author  = {Shane Legg and Marcus Hutter and Akshat Kumar},
+    year    = {2004},
+    eprint  = {cs/0403038},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/cs/0403038},
+}
+```
