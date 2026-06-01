@@ -196,6 +196,7 @@ type
     meta_nodes: seq[MetaNode] = @[]
     meta_edges: seq[MetaEdge] = @[]
     cached_exec_trace: Option[ExecTrace]
+    mutation_step_size: float32 = 0.1
 
   # hyperparams
 
@@ -211,6 +212,9 @@ type
     prob_inherit_all_excess_genes: float = 1.0
 
   MutationHyperParams = object
+    use_self_adaptive_mutation: bool = false
+    min_mutation_step_size: float = 0.001
+    max_mutation_step_size: float = 0.1
     mutate_prob: float = 0.95
     use_fast_ga: bool = false
     fast_ga_beta: float = 1.5
@@ -480,7 +484,8 @@ proc init_nn(
   let nn = NeuralNetwork(
     num_inputs: top.num_inputs,
     num_outputs: top.num_outputs,
-    num_hiddens: top.num_hiddens
+    num_hiddens: top.num_hiddens,
+    mutation_step_size: top.mutation_hyper_params.perturb_weight_strength.float32
   )
 
   let
@@ -1280,6 +1285,27 @@ proc mutate(
   let meta_nodes_len = nn.meta_nodes.len
   let meta_edges_len = nn.meta_edges.len
 
+  # determine mutation step sizes
+
+  var
+    weight_step = hparams.perturb_weight_strength.float32
+    bias_step   = hparams.perturb_bias_strength.float32
+
+  if hparams.use_self_adaptive_mutation:
+    let num_active_nodes = nn.meta_nodes.countIt(not it.disabled)
+    let num_active_edges = nn.meta_edges.countIt(not it.disabled)
+    let num_active_genes = num_active_nodes + num_active_edges
+
+    if num_active_genes > 0:
+      let tau = 1.0'f32 / sqrt(num_active_genes.float32)
+      let step_multiplier = exp(tau * random_normal())
+
+      nn.mutation_step_size *= step_multiplier
+      nn.mutation_step_size = max(min(nn.mutation_step_size, hparams.max_mutation_step_size.float32), hparams.min_mutation_step_size.float32)
+
+    weight_step = nn.mutation_step_size
+    bias_step   = nn.mutation_step_size
+
   template perturb_value(val: var float32, replace_prob: float, perturb_strength: float, max_mag: float) =
     if satisfy_prob(replace_prob):
       val = random_normal()
@@ -1308,13 +1334,13 @@ proc mutate(
       node.activation = rand_activation()
 
     if not hparams.use_fast_ga and satisfy_prob(hparams.change_node_bias_prob):
-      perturb_value(node.bias, hparams.replace_node_bias_prob, hparams.perturb_bias_strength, hparams.max_weight_magnitude)
+      perturb_value(node.bias, hparams.replace_node_bias_prob, bias_step.float, hparams.max_weight_magnitude)
 
   if hparams.use_fast_ga:
     fast_ga_loop(meta_nodes_len, hparams.fast_ga_beta, i):
       let node = nn.meta_nodes[i]
       if not node.disabled:
-        perturb_value(node.bias, hparams.replace_node_bias_prob, hparams.perturb_bias_strength, hparams.max_weight_magnitude)
+        perturb_value(node.bias, hparams.replace_node_bias_prob, bias_step.float, hparams.max_weight_magnitude)
 
   # mutating edges
 
@@ -1323,7 +1349,7 @@ proc mutate(
     if edge.disabled: continue
 
     if not hparams.use_fast_ga and satisfy_prob(hparams.change_edge_weight_prob):
-      perturb_value(edge.weight, hparams.replace_edge_weight_prob, hparams.perturb_weight_strength, hparams.max_weight_magnitude)
+      perturb_value(edge.weight, hparams.replace_edge_weight_prob, weight_step.float, hparams.max_weight_magnitude)
 
     if edge.can_disable and satisfy_prob(hparams.toggle_meta_edge_prob):
       edge.disabled = not edge.disabled
@@ -1333,7 +1359,7 @@ proc mutate(
     fast_ga_loop(meta_edges_len, hparams.fast_ga_beta, i):
       let edge = nn.meta_edges[i]
       if not edge.disabled:
-        perturb_value(edge.weight, hparams.replace_edge_weight_prob, hparams.perturb_weight_strength, hparams.max_weight_magnitude)
+        perturb_value(edge.weight, hparams.replace_edge_weight_prob, weight_step.float, hparams.max_weight_magnitude)
 
   # structural mutations - fired ONCE per individual, not per node/edge
 
@@ -1641,14 +1667,21 @@ proc crossover(
 
     child_edges.add(new_edge)
 
-  # add child to population
+  # child inherits adaptive mutation step size from the fitter parent
+
+  let fitter_parent =
+    if first_parent_fitness > second_parent_fitness: parent1
+    elif second_parent_fitness > first_parent_fitness: parent2
+    elif coin_flip(): parent1
+    else: parent2
 
   let nn = NeuralNetwork(
     num_inputs: top.num_inputs,
     num_outputs: top.num_outputs,
     num_hiddens: top.num_hiddens,
     meta_nodes: child_nodes,
-    meta_edges: child_edges
+    meta_edges: child_edges,
+    mutation_step_size: fitter_parent.mutation_step_size
   )
 
   return nn
@@ -1723,6 +1756,7 @@ proc clone*(nn: NeuralNetwork): NeuralNetwork =
     meta_nodes: cloned_nodes,
     meta_edges: cloned_edges,
     cached_exec_trace: none(ExecTrace),
+    mutation_step_size: nn.mutation_step_size,
   )
 
 proc migrate_islands*(

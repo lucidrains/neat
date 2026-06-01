@@ -109,3 +109,18 @@ $ uv run train_lunar.py
     url     = {https://arxiv.org/abs/cs/0403038},
 }
 ```
+
+```bibtex
+@article{hiraga2024improving,
+    title   = {Improving the performance of mutation-based evolving artificial neural networks with self-adaptive mutations},
+    author  = {Hiraga, Motoaki and Komura, Masahiro and Miyamoto, Akiharu and Morimoto, Daichi and Ohkura, Kazuhiro},
+    journal = {PLOS ONE},
+    volume  = {19},
+    number  = {7},
+    pages   = {e0307084},
+    year    = {2024},
+    publisher = {Public Library of Science},
+    doi     = {10.1371/journal.pone.0307084},
+    url     ={https://doi.org/10.1371/journal.pone.0307084}
+}
+```

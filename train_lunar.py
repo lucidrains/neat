@@ -76,6 +76,7 @@ def train(
 
     # mutation parameters
     mutate_prob: float = 0.95,
+    use_self_adaptive_mutation: bool = False,
     use_fast_ga: bool = False,
     fast_ga_beta: float = 1.5,
     add_novel_edge_prob: float = 0.05,
@@ -123,6 +124,7 @@ def train(
 
     mutation_hyper_params = dict(
         mutate_prob = mutate_prob,
+        use_self_adaptive_mutation = use_self_adaptive_mutation,
         use_fast_ga = use_fast_ga,
         fast_ga_beta = fast_ga_beta,
         add_novel_edge_prob = add_novel_edge_prob,
