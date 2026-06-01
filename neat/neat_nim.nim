@@ -1235,8 +1235,8 @@ proc select_and_tournament(
     for couple in parent_indices:
       let ((p1_idx, p1_fit), (p2_idx, p2_fit)) = couple
 
-      let global_p1_idx = p1_idx + offset
-      let global_p2_idx = p2_idx + offset
+      let global_p1_idx = selected_sorted_indices[p1_idx] + offset
+      let global_p2_idx = selected_sorted_indices[p2_idx] + offset
 
       all_parent_indices.add(((global_p1_idx, p1_fit), (global_p2_idx, p2_fit)))
 
