@@ -59,6 +59,7 @@ def train(
     end_max_episode_len: int = 250,
     curriculum_generations: int = 200,
     num_rollouts_before_evo: int = 2,
+    num_recurrent: int = 0,
 
     # selection parameters
     frac_natural_selected: float = 0.15,
@@ -154,6 +155,7 @@ def train(
         crossover_hyper_params = crossover_hyper_params,
         selection_hyper_params = selection_hyper_params,
         num_islands = num_islands,
+        num_recurrent = num_recurrent,
     )
 
     # initialize experiment tracker
@@ -197,6 +199,7 @@ def train(
     ):
         nonlocal num_recorded
 
+        population.reset_recurrent_state()
         state, _ = rec_env.reset(seed = seed)
 
         while True:
@@ -244,6 +247,7 @@ def train(
         current_max_episode_len = int(np.interp(gen, [0, curriculum_generations], [start_max_episode_len, end_max_episode_len]))
 
         for _ in range(num_rollouts_before_evo):
+            population.reset_recurrent_state()
             state, _ = envs.reset(seed = seed)
 
             done = np.zeros(pop_size, dtype = bool)

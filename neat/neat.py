@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import json
-from random import randrange
-from contextlib import contextmanager
-
 import numpy as np
 
 import nimporter
@@ -64,12 +60,22 @@ class Topology:
         mutation_hyper_params = None,
         crossover_hyper_params = None,
         selection_hyper_params = None,
-        num_islands = 1
+        num_islands = 1,
+        num_recurrent = 0
     ):
         if isinstance(num_hiddens, int):
             num_hiddens = (num_hiddens,)
 
-        self.id = add_topology(num_inputs, num_outputs, num_hiddens, mutation_hyper_params, crossover_hyper_params, selection_hyper_params, num_islands)
+        self.id = add_topology(
+            num_inputs,
+            num_outputs,
+            num_hiddens,
+            mutation_hyper_params,
+            crossover_hyper_params,
+            selection_hyper_params,
+            num_islands,
+            num_recurrent
+        )
 
         self.init_population(pop_size)
 
@@ -159,7 +165,8 @@ class NEAT(GeneticAlgorithm):
         mutation_hyper_params = None,
         crossover_hyper_params = None,
         selection_hyper_params = None,
-        num_islands = 1
+        num_islands = 1,
+        num_recurrent = 0
     ):
         self.dims = dims
         assert len(dims) >= 2
@@ -169,11 +176,29 @@ class NEAT(GeneticAlgorithm):
         dim_hiddens = list(dims[1:-1])
 
         self.dim_out = dim_out
+        self.num_recurrent = num_recurrent
 
-        self.output = np.empty((pop_size, self.dim_out), dtype = np.float32)
+        self.output = np.empty((pop_size, self.dim_out + self.num_recurrent), dtype = np.float32)
 
-        self.top = Topology(dim_in, dim_out, num_hiddens = dim_hiddens, pop_size = pop_size, mutation_hyper_params = mutation_hyper_params, crossover_hyper_params = crossover_hyper_params, selection_hyper_params = selection_hyper_params, num_islands = num_islands)
+        self.top = Topology(
+            dim_in,
+            dim_out,
+            num_hiddens = dim_hiddens,
+            pop_size = pop_size,
+            mutation_hyper_params = mutation_hyper_params,
+            crossover_hyper_params = crossover_hyper_params,
+            selection_hyper_params = selection_hyper_params,
+            num_islands = num_islands,
+            num_recurrent = num_recurrent
+        )
         self.all_top_ids = [self.top.id]
+
+        self.recurrent_state = None
+        self.single_recurrent_state = None
+
+    def reset_recurrent_state(self):
+        self.recurrent_state = None
+        self.single_recurrent_state = None
 
     def single_forward(
         self,
@@ -182,7 +207,16 @@ class NEAT(GeneticAlgorithm):
         sample = False,
         temperature = 1.
     ):
+        has_recurrent = self.num_recurrent > 0
+
+        if has_recurrent:
+            self.single_recurrent_state = default(self.single_recurrent_state, np.zeros(self.num_recurrent, dtype = np.float32))
+            state = np.concatenate((state, self.single_recurrent_state))
+
         logits = np.array(evaluate_nn_single(self.top.id, index, state.tolist(), use_exec_cache = True), dtype = np.float32)
+
+        if has_recurrent:
+            logits, self.single_recurrent_state = logits[:-self.num_recurrent], logits[-self.num_recurrent:].copy()
 
         if not sample:
             return logits
@@ -195,14 +229,26 @@ class NEAT(GeneticAlgorithm):
         sample = False,
         temperature = 1.,
     ):
+        has_recurrent = self.num_recurrent > 0
+
+        if has_recurrent:
+            batch, *_ = state.shape
+            self.recurrent_state = default(self.recurrent_state, np.zeros((batch, self.num_recurrent), dtype = np.float32))
+            state = np.concatenate((state, self.recurrent_state), axis = -1)
+
         input = np.ascontiguousarray(state, dtype = np.float32)
 
         evaluate_population(self.top.id, input, self.output)
 
-        if not sample:
-            return self.output
+        out = self.output
 
-        return gumbel_sample(self.output, temperature = temperature)
+        if has_recurrent:
+            out, self.recurrent_state = out[:, :-self.num_recurrent], out[:, -self.num_recurrent:].copy()
+
+        if not sample:
+            return out
+
+        return gumbel_sample(out, temperature = temperature)
 
     def backprop(
         self,

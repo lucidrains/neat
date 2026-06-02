@@ -249,6 +249,7 @@ type
     num_inputs: int
     num_outputs: int
     num_hiddens: seq[int] = @[]
+    num_initial_edges: int
 
     nn_id: int = 0
     node_innovation_id: Atomic[int]
@@ -357,14 +358,18 @@ proc add_topology(
   mutation_hyper_params: MutationHyperParams = MutationHyperParams(),
   crossover_hyper_params: CrossoverHyperParams = CrossoverHyperParams(),
   selection_hyper_params: SelectionHyperParams = SelectionHyperParams(),
-  num_islands: int = 1
+  num_islands: int = 1,
+  num_recurrent: int = 0
 ): int {.exportpy.} =
+
+  let num_initial_edges = num_inputs * num_outputs
 
   let topology = Topology(
     id: topology_id.fetch_add(1),
-    num_inputs: num_inputs,
-    num_outputs: num_outputs,
+    num_inputs: num_inputs + num_recurrent,
+    num_outputs: num_outputs + num_recurrent,
     num_hiddens: num_hiddens,
+    num_initial_edges: num_initial_edges,
     mutation_hyper_params: mutation_hyper_params,
     crossover_hyper_params: crossover_hyper_params,
     selection_hyper_params: selection_hyper_params,
@@ -381,19 +386,24 @@ proc add_topology(
   # create input and output nodes
 
   let
-    input_node_ids = (0..<num_inputs).to_seq
-    output_node_ids = (num_inputs..<(num_inputs + num_outputs)).to_seq
+    total_num_inputs = num_inputs + num_recurrent
+    total_num_outputs = num_outputs + num_recurrent
 
-  for _ in 0..<num_inputs:
+  for _ in 0..<total_num_inputs:
     discard add_node(topology, NodeType.input)
 
-  for _ in 0..<num_outputs:
+  for _ in 0..<total_num_outputs:
     discard add_node(topology, NodeType.output)
 
   # create edges
 
-  for input_id in input_node_ids:
-    for output_id in output_node_ids:
+  # only connect original inputs to original outputs, excluding recurrent nodes
+  let
+    orig_input_node_ids = (0..<num_inputs).to_seq
+    orig_output_node_ids = ((num_inputs + num_recurrent)..<(num_inputs + num_recurrent + num_outputs)).to_seq
+
+  for input_id in orig_input_node_ids:
+    for output_id in orig_output_node_ids:
       discard add_edge(topology, input_id, output_id)
 
   # initial pool of hidden nodes and edges, all disabled for new neural networks at start
@@ -408,7 +418,7 @@ proc add_topology(
 
     hidden_node_ids.add(layer_hidden_ids)
 
-  var all_ids: seq[seq[int]] = @[input_node_ids] & hidden_node_ids & @[output_node_ids]
+  var all_ids: seq[seq[int]] = @[orig_input_node_ids] & hidden_node_ids & @[orig_output_node_ids]
 
   for layer_index, from_layer_ids in all_ids[0..^2]:
 
@@ -491,7 +501,7 @@ proc init_nn(
   let
     output_node_index_start = top.num_inputs
     hidden_node_index_start = top.num_inputs + top.num_outputs
-    hidden_edge_index_start = top.num_inputs * top.num_outputs
+    hidden_edge_index_start = top.num_initial_edges
 
   # index from global node id to local node id
 
@@ -548,7 +558,7 @@ proc init_nn(
 
   # create edges - start off with only fully connected from inputs to outputs
 
-  for index, edge in top.edges[0..<(top.num_inputs * top.num_outputs)]:
+  for index, edge in top.edges[0..<top.num_initial_edges]:
 
       let meta_edge = MetaEdge(
         topology_id: top.id,
