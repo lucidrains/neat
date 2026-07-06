@@ -1427,7 +1427,7 @@ proc mutate(
 
       let new_local_node_id = nn.meta_nodes.len
       nn.meta_nodes.add(MetaNode(
-        topology_id: top.id, node_id: node_id,
+        topology_id: top.id, node_id: node_id, can_disable: true,
         activation: if coin_flip(): relu else: sigmoid, can_change_activation: coin_flip(),
       ))
       node_index[node_id] = new_local_node_id
@@ -1488,11 +1488,15 @@ proc mutate_all(
     let top = topologies[top_id]
 
     let hyper_params = mutation_hyper_params.get(top.mutation_hyper_params)
+    let num_islands = top.num_islands
+    let pop_size = top.population.len
+    let island_pop_size = pop_size div num_islands
 
-    assert hyper_params.num_preserve_elites < top.population.len
-    for nn_id in hyper_params.num_preserve_elites ..< top.population.len:
-
-      mutate(top, nn_id, mutation_hyper_params)
+    assert hyper_params.num_preserve_elites < island_pop_size
+    for i in 0 ..< num_islands:
+      let offset = i * island_pop_size
+      for nn_id in (offset + hyper_params.num_preserve_elites) ..< (offset + island_pop_size):
+        mutate(top, nn_id, mutation_hyper_params)
 
     set_population_exec_trace(top_id)
 

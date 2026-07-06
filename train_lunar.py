@@ -63,8 +63,8 @@ def train(
 
     # selection parameters
     frac_natural_selected: float = 0.15,
-    tournament_size: int = 3,
-    prob_weigh_complexity_as_fitness: float = 0.05,
+    tournament_size: int = 4,
+    prob_weigh_complexity_as_fitness: float = 0.0025,
     use_fuss: bool = False,
     fuss_eps: float = 1e-5,
 
