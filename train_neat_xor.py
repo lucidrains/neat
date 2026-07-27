@@ -1,3 +1,6 @@
+import nimporter_plus
+nimporter_plus.compiler_args.append('-d:danger')
+
 import neat
 import numpy as np
 

@@ -24,7 +24,7 @@ classifiers=[
 
 dependencies = [
     "einops>=0.8.1",
-    "nimporter-plus>=0.0.4",
+    "nimporter-plus>=0.0.5",
     "numpy",
     "setuptools"
 ]
@@ -56,5 +56,5 @@ pythonpath = [
 ]
 
 [build-system]
-requires = ["setuptools", "nimporter-plus>=0.0.4"]
+requires = ["setuptools", "nimporter-plus>=0.0.5"]
 build-backend = "setuptools.build_meta"

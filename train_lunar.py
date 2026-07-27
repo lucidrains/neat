@@ -17,6 +17,10 @@
 # ///
 
 import fire
+
+import nimporter_plus
+nimporter_plus.compiler_args.append('-d:danger')
+
 from pathlib import Path
 from shutil import rmtree
 from random import randrange
