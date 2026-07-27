@@ -1,18 +1,7 @@
-# nimporter caches aggressively. If python imports don't reflect .nim changes,
-# run `just rebuild` to nuke caches and recompile.
+# nimporter_plus transparently compiles Nim extensions on import.
 
-rebuild:
-	rm -f neat/neat_nim.*.so
-	rm -rf build/
-	rm -rf nim-extensions/
-	rm -rf neat/__pycache__/
-	uv pip install -e .
-
-test-xor: rebuild
+test-xor:
 	python3 train_neat_xor.py
 
-compile:
-	nim c --app:lib -d:release --out:neat/neat_nim.so neat/neat_nim.nim
-
-train-lunar-fuss: compile
+train-lunar-fuss:
 	uv run train_lunar.py --use_fuss=True --fuss_eps=1e-5

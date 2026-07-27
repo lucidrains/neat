@@ -1,5 +1,5 @@
 from setuptools import setup
-from nimporter import *
+from nimporter_plus import *
 
 setup(
     name = 'neat',

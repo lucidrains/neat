@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-import nimporter
+import nimporter_plus
 
 from neat.neat_nim import (
     add_topology,
