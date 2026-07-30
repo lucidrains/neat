@@ -59,8 +59,8 @@ def train(
     save_population_every: int = 100,
 
     # environment parameters
-    start_max_episode_len: int = 20,
-    end_max_episode_len: int = 250,
+    start_max_episode_len: int = 200,
+    end_max_episode_len: int = 500,
     curriculum_generations: int = 200,
     num_rollouts_before_evo: int = 2,
     num_recurrent: int = 0,

@@ -960,7 +960,6 @@ proc evaluate_nn_single_with_trace_thread_fn(
   for i in 0 ..< num_outputs:
     buffer_output[i] = thread_local_values[num_inputs + i]
 
-
 proc set_population_exec_trace(
   top_id: int
 ) =
@@ -1250,8 +1249,8 @@ proc select_and_tournament(
     for couple in parent_indices:
       let ((p1_idx, p1_fit), (p2_idx, p2_fit)) = couple
 
-      let global_p1_idx = selected_sorted_indices[p1_idx] + offset
-      let global_p2_idx = selected_sorted_indices[p2_idx] + offset
+      let global_p1_idx = offset + p1_idx
+      let global_p2_idx = offset + p2_idx
 
       all_parent_indices.add(((global_p1_idx, p1_fit), (global_p2_idx, p2_fit)))
 
@@ -1335,10 +1334,11 @@ proc mutate(
 
   for i in 0 ..< meta_nodes_len:
     let node = nn.meta_nodes[i]
-    if node.disabled: continue
 
     if node.can_disable and satisfy_prob(hparams.add_remove_node_prob):
       node.disabled = not node.disabled
+
+    if node.disabled: continue
 
     if node.can_change_activation and satisfy_prob(hparams.change_activation_prob):
       node.activation = rand_activation()
@@ -1356,14 +1356,15 @@ proc mutate(
 
   for i in 0 ..< meta_edges_len:
     let edge = nn.meta_edges[i]
-    if edge.disabled: continue
-
-    if not hparams.use_fast_ga and satisfy_prob(hparams.change_edge_weight_prob):
-      perturb_value(edge.weight, hparams.replace_edge_weight_prob, weight_step.float, hparams.max_weight_magnitude)
 
     if edge.can_disable and satisfy_prob(hparams.toggle_meta_edge_prob):
       edge.disabled = not edge.disabled
       if not edge.disabled: edge.weight = random_normal()
+
+    if edge.disabled: continue
+
+    if not hparams.use_fast_ga and satisfy_prob(hparams.change_edge_weight_prob):
+      perturb_value(edge.weight, hparams.replace_edge_weight_prob, weight_step.float, hparams.max_weight_magnitude)
 
   if hparams.use_fast_ga:
     fast_ga_loop(meta_edges_len, hparams.fast_ga_beta, i):
@@ -1371,12 +1372,24 @@ proc mutate(
       if not edge.disabled:
         perturb_value(edge.weight, hparams.replace_edge_weight_prob, weight_step.float, hparams.max_weight_magnitude)
 
+  # helper for creating & indexing new meta edges
+
+  template add_meta_edge(e_id, from_id, to_id: int, w: float32) =
+    edge_index[e_id] = nn.meta_edges.len
+    nn.meta_edges.add(MetaEdge(
+      topology_id: top.id, edge_id: e_id,
+      local_from_node_id: from_id, local_to_node_id: to_id,
+      weight: w
+    ))
+
   # structural mutations - fired ONCE per individual, not per node/edge
 
   if satisfy_prob(hparams.grow_node_prob):
     var active_nodes: seq[int] = @[]
+
     for i in 0 ..< meta_nodes_len:
       if not nn.meta_nodes[i].disabled: active_nodes.add(i)
+
     if active_nodes.len > 0:
       let meta_node = nn.meta_nodes[sample(active_nodes)]
       let meta_node_global_id = meta_node.node_id
@@ -1399,10 +1412,7 @@ proc mutate(
 
       for new_edge_id in new_edge_ids:
         let edge = top.edges[new_edge_id]
-        nn.meta_edges.add(MetaEdge(
-          topology_id: top.id, edge_id: new_edge_id, local_from_node_id: node_index[edge.from_node_id],
-          local_to_node_id: node_index[edge.to_node_id], weight: random_normal()
-        ))
+        add_meta_edge(new_edge_id, node_index[edge.from_node_id], node_index[edge.to_node_id], random_normal())
 
   if satisfy_prob(hparams.grow_edge_prob):
     var active_edges: seq[int] = @[]
@@ -1413,9 +1423,7 @@ proc mutate(
       meta_edge.disabled = true
       let edge = top.edges[meta_edge.edge_id]
 
-      var node_id: int
-      var edge_id1: int
-      var edge_id2: int
+      var node_id, edge_id1, edge_id2: int
       if top.edge_splits.has_key(meta_edge.edge_id):
         let split_info = top.edge_splits[meta_edge.edge_id]
         node_id = split_info[0]; edge_id1 = split_info[1]; edge_id2 = split_info[2]
@@ -1432,14 +1440,8 @@ proc mutate(
       ))
       node_index[node_id] = new_local_node_id
 
-      nn.meta_edges.add(MetaEdge(
-        topology_id: top.id, edge_id: edge_id1, local_from_node_id: meta_edge.local_from_node_id,
-        local_to_node_id: new_local_node_id, weight: 1.0
-      ))
-      nn.meta_edges.add(MetaEdge(
-        topology_id: top.id, edge_id: edge_id2, local_from_node_id: new_local_node_id,
-        local_to_node_id: meta_edge.local_to_node_id, weight: meta_edge.weight
-      ))
+      add_meta_edge(edge_id1, meta_edge.local_from_node_id, new_local_node_id, 1.0)
+      add_meta_edge(edge_id2, new_local_node_id, meta_edge.local_to_node_id, meta_edge.weight)
 
   if satisfy_prob(hparams.add_novel_edge_prob):
     var active_nodes: seq[int] = @[]
@@ -1461,11 +1463,7 @@ proc mutate(
         let edge_id = if not top.conn_index.has_key(rct): add_edge(top, from_global, to_global) else: top.conn_index[rct]
 
         if not edge_index.has_key(edge_id):
-          nn.meta_edges.add(MetaEdge(
-            topology_id: top.id, edge_id: edge_id, local_from_node_id: from_local,
-            local_to_node_id: to_local, weight: random_normal()
-          ))
-          edge_index[edge_id] = nn.meta_edges.len - 1
+          add_meta_edge(edge_id, from_local, to_local, random_normal())
         else:
           nn.meta_edges[edge_index[edge_id]].disabled = false
 
@@ -1829,9 +1827,11 @@ proc reset_top_islands*(
       let survivor_island_ids = island_avgs[num_islands_to_reset .. ^1].map(x => x[1])
 
       var global_survivor_indices: seq[int] = @[]
+      let num_selected_per_island = max(2, (first_top.selection_hyper_params.frac_natural_selected * island_pop_size.float).int)
+
       for island_id in survivor_island_ids:
         let offset = island_id * island_pop_size
-        for j in 0 ..< island_pop_size:
+        for j in 0 ..< num_selected_per_island:
           global_survivor_indices.add(offset + j)
 
       for island_id in reset_island_ids:
