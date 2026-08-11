@@ -1169,7 +1169,7 @@ proc tournament*(
 
     var
       parent1, parent2: int = -1
-      fitness1, fitness2: float32 = -1e6
+      fitness1, fitness2: float32 = low(float32)
 
     shuffle(gene_ids)
     let tournament = gene_ids[0..<tournament_size]
@@ -1456,7 +1456,7 @@ proc mutate(
         to_local = sample(active_nodes)
         attempts += 1
 
-      if from_local != to_local:
+      if from_local != to_local and top.nodes_index[nn.meta_nodes[from_local].node_id].`type` != NodeType.output and top.nodes_index[nn.meta_nodes[to_local].node_id].`type` != NodeType.input:
         let from_global = nn.meta_nodes[from_local].node_id
         let to_global = nn.meta_nodes[to_local].node_id
         let rct = (from_global, to_global)
@@ -1839,7 +1839,7 @@ proc reset_top_islands*(
 
         for nn_id in offset ..< offset + island_pop_size:
           var p1, p2: int = -1
-          var f1, f2: float32 = -1e10
+          var f1, f2: float32 = low(float32)
 
           for _ in 0 ..< tournament_size:
             let idx = global_survivor_indices[rand(global_survivor_indices.len - 1)]

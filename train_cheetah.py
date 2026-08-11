@@ -237,8 +237,10 @@ def train(
 
         current_max_episode_len = int(np.interp(gen, [0, curriculum_generations], [start_max_episode_len, end_max_episode_len]))
 
+        envs.reset(seed = seed)
+
         for _ in range(num_rollouts_before_evo):
-            state, _ = envs.reset(seed = seed)
+            state, _ = envs.reset()
 
             done = np.zeros(pop_size, dtype = bool)
             reward_buffer[:] = 0.0

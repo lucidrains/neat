@@ -47,13 +47,16 @@ def divisible_by(num, den):
 # environment
 
 class VecSnakeEnv:
-    def __init__(self, num_envs, grid_size = 4, max_steps = 40, food_reward = 1.0, hit_wall_penalty = -5.0, existence_penalty = -0.01):
+    def __init__(self, num_envs, grid_size = 4, max_steps = 40, food_reward = 1.0, hit_wall_penalty = -5.0, existence_penalty = -0.01, seed_sync = True):
         self.num_envs = num_envs
         self.grid_size = grid_size
         self._max_steps = max_steps
         self.food_reward = food_reward
         self.hit_wall_penalty = hit_wall_penalty
         self.existence_penalty = existence_penalty
+        self.seed_sync = seed_sync
+
+        self._rng = np.random.default_rng()
 
         self.max_len = grid_size * grid_size
 
@@ -69,8 +72,8 @@ class VecSnakeEnv:
         self._max_steps = value
 
     def reset(self, seed = None):
-        if exists(seed):
-            np.random.seed(seed)
+        if self.seed_sync and exists(seed):
+            self._rng = np.random.default_rng(seed)
             import random
             random.seed(seed)
 
@@ -78,11 +81,11 @@ class VecSnakeEnv:
         self.done = np.zeros(self.num_envs, dtype=bool)
 
         self.snake = np.zeros((self.num_envs, self.max_len, 2), dtype=np.int32)
-        self.snake[:, 0, 0] = np.random.randint(self.grid_size, size=self.num_envs)
-        self.snake[:, 0, 1] = np.random.randint(self.grid_size, size=self.num_envs)
+        self.snake[:, 0, 0] = self._rng.integers(self.grid_size, size=self.num_envs)
+        self.snake[:, 0, 1] = self._rng.integers(self.grid_size, size=self.num_envs)
         self.snake_length = np.ones(self.num_envs, dtype=np.int32)
 
-        self.direction = np.random.randint(4, size=self.num_envs)
+        self.direction = self._rng.integers(4, size=self.num_envs)
 
         self.food = np.zeros((self.num_envs, 2), dtype=np.int32)
         mask = np.ones(self.num_envs, dtype=bool)
@@ -105,8 +108,8 @@ class VecSnakeEnv:
             count = len(unplaced_idx)
             env_idxs = needs_food_indices[unplaced_idx]
 
-            cand_x = np.random.randint(self.grid_size, size=count)
-            cand_y = np.random.randint(self.grid_size, size=count)
+            cand_x = self._rng.integers(self.grid_size, size=count)
+            cand_y = self._rng.integers(self.grid_size, size=count)
             cand_pos = np.stack([cand_x, cand_y], axis=-1)
 
             match = (self.snake[env_idxs, :, 0] == cand_x[:, None]) & (self.snake[env_idxs, :, 1] == cand_y[:, None])
@@ -288,6 +291,7 @@ def train(
     recording_folder: str = './recordings-snake',
     recorded_population_folder: str = './recorded-populations-snake',
     use_wandb: bool = False,
+    seed_sync: bool = True,
 ):
 
     print(f'\nrecordings will be saved to {Path(recording_folder).resolve()}, every {record_every} generations\n')
@@ -347,11 +351,12 @@ def train(
 
     envs = VecSnakeEnv(
         num_envs = pop_size,
-        grid_size = 4,
+        grid_size = grid_size,
         max_steps = end_max_episode_len,
         food_reward = food_reward,
         hit_wall_penalty = hit_wall_penalty,
-        existence_penalty = existence_penalty
+        existence_penalty = existence_penalty,
+        seed_sync = seed_sync
     )
 
     # single environment for recording
@@ -368,8 +373,9 @@ def train(
 
         population.reset_recurrent_state()
         rec_env = VecSnakeEnv(
-            num_envs = 1, grid_size = 4, max_steps = end_max_episode_len,
-            food_reward = food_reward, hit_wall_penalty = hit_wall_penalty, existence_penalty = existence_penalty
+            num_envs = 1, grid_size = grid_size, max_steps = end_max_episode_len,
+            food_reward = food_reward, hit_wall_penalty = hit_wall_penalty, existence_penalty = existence_penalty,
+            seed_sync = seed_sync
         )
 
         state, _ = rec_env.reset(seed = seed)
@@ -424,9 +430,12 @@ def train(
 
         envs.max_steps = current_max_episode_len
 
+        if seed_sync:
+            envs.reset(seed = seed)
+
         for _ in range(num_rollouts_before_evo):
             population.reset_recurrent_state()
-            state, _ = envs.reset(seed = seed)
+            state, _ = envs.reset()
 
             done = np.zeros(pop_size, dtype = bool)
             reward_buffer[:] = 0.

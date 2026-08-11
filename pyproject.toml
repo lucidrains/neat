@@ -50,6 +50,12 @@ gym = [
     "wandb[media]"
 ]
 
+[tool.setuptools]
+packages = ["neat"]
+
+[tool.setuptools.package-data]
+neat = ["*.nim"]
+
 [tool.pytest.ini_options]
 pythonpath = [
     "."
