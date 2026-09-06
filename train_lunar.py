@@ -10,6 +10,7 @@
 #     "box2d-py",
 #     "swig",
 #     "moviepy>=1.0.3",
+#     "rich",
 # ]
 #
 # [tool.uv.sources]
@@ -37,8 +38,37 @@ from neat.neat_nim import get_population_complexities
 
 # helpers
 
+def exists(v):
+    return v is not None
+
 def divisible_by(num, den):
     return (num % den) == 0
+
+# display table
+
+def display_hyperparams(config: dict[str, dict[str, object]]):
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(
+        title = 'neat lunar lander',
+        title_style = 'bold yellow',
+        border_style = 'bright_black',
+        header_style = 'bold cyan'
+    )
+
+    table.add_column('group', style = 'yellow', justify = 'right')
+    table.add_column('hyperparameter', style = 'cyan')
+    table.add_column('value', style = 'green')
+
+    for group_idx, (group, params) in enumerate(config.items()):
+        if group_idx > 0:
+            table.add_section()
+
+        for i, (k, v) in enumerate(params.items()):
+            table.add_row(group if i == 0 else '', k, str(v))
+
+    Console().print(table)
 
 # main training script
 
@@ -49,7 +79,7 @@ def train(
     # neat configurations
 
     # intervals
-    record_every: int = 25,
+    record_every: int = 10,
     save_population_every: int = 100,
 
     # environment parameters
@@ -101,9 +131,11 @@ def train(
     # simplicity regularizer
     simplicity_weight: float = 1.0,
 
-    # brood competition parameters
-    brood_size: int = 1,
+    # child local search and brood parameters
+    child_local_search_size: int = 2,
+    brood_size: int = 2,
     num_brood_rollouts: int = 1,
+    prob_structural_brood: float | None = None,
 
     # system
     recording_folder: str = './recordings',
@@ -112,7 +144,37 @@ def train(
     continuous: bool = False
 ):
 
-    print(f'\nrecordings will be saved to {Path(recording_folder).resolve()}, every {record_every} generations\n')
+    env_name = 'LunarLanderContinuous-v3' if continuous else 'LunarLander-v3'
+
+    display_hyperparams({
+        'env': {
+            'name': env_name,
+            'pop_size': pop_size,
+            'generations': num_generations,
+            'islands': num_islands,
+            'recurrent': num_recurrent
+        },
+        'search': {
+            'brood_size': brood_size,
+            'child_local_search_size': child_local_search_size,
+            'brood_rollouts': num_brood_rollouts,
+            'prob_structural_brood': f'{prob_structural_brood:.2%}' if exists(prob_structural_brood) else 'auto (~5.3%)'
+        },
+        'selection': {
+            'mode': f'fuss (eps={fuss_eps})' if use_fuss else f'tournament (size={tournament_size})',
+            'frac_selected': frac_natural_selected,
+            'elites': num_preserve_elites
+        },
+        'migration': {
+            'migrate': f'{migrate_num} every {migrate_every} gens' if migrate_num > 0 else 'disabled',
+            'reset_islands': f'{reset_islands_num} every {reset_islands_every} gens' if reset_islands_num > 0 else 'disabled'
+        },
+        'system': {
+            'record_every': f'{record_every} gens',
+            'record_folder': Path(recording_folder).resolve(),
+            'wandb': 'online' if wandb_online else 'disabled'
+        }
+    })
 
     run_name = f'neat-{pop_size}'
 
@@ -164,8 +226,6 @@ def train(
 
     wandb.init(project = 'lunar-neat', mode = 'disabled' if not wandb_online else 'online')
     wandb.run.name = run_name
-
-    env_name = 'LunarLanderContinuous-v3' if continuous else 'LunarLander-v3'
 
     # environments
 
@@ -289,6 +349,8 @@ def train(
         def brood_eval(pop_model, target_nn_ids):
             return rollout_population(pop_model, num_brood_rollouts, current_max_episode_len)
 
+        use_eval = (brood_size > 1 or child_local_search_size > 1)
+
         population.genetic_algorithm_step(
             fitnesses,
             selection_hyper_params = selection_hyper_params,
@@ -299,7 +361,9 @@ def train(
             prob_weigh_complexity_as_fitness = prob_weigh_complexity_as_fitness,
             simplicity_weight = simplicity_weight,
             brood_size = brood_size,
-            eval_fn = brood_eval if brood_size > 1 else None
+            child_local_search_size = child_local_search_size,
+            prob_structural_brood = prob_structural_brood,
+            eval_fn = brood_eval if use_eval else None
         )
 
         # logging
@@ -327,6 +391,9 @@ def train(
 
         if divisible_by(gen + 1, save_population_every):
             population.save_json(f'{recorded_population_folder}/population.step.{gen + 1}')
+
+    envs.close()
+    rec_env.close()
 
 if __name__ == '__main__':
     fire.Fire(train)

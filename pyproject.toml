@@ -1,6 +1,6 @@
 [project]
 name = "x-neat"
-version = "0.0.5"
+version = "0.0.6"
 description = "NEAT"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -46,7 +46,8 @@ gym = [
     "numpy>=2.2.5",
     "swig",
     "tqdm",
-    "wandb[media]"
+    "wandb[media]",
+    "rich"
 ]
 
 [tool.setuptools]

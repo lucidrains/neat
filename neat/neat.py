@@ -10,15 +10,19 @@ from neat.neat_nim import (
     add_topology,
     backprop_nn_single,
     clone_nn,
+    clone_nn_obj,
     crossover_and_add_to_population,
     evaluate_nn_single,
     evaluate_population,
     get_population_complexities,
+    get_population_json,
     get_topology_info,
     init_population as init_population_nim,
     migrate_islands as migrate_nim,
     mutate_all,
-    mutate_selected,
+    mutate_selected_structural,
+    mutate_selected_structural_forced,
+    mutate_selected_weights,
     mutate_survivors,
     remove_topology,
     reset_top_islands as reset_islands_nim,
@@ -57,6 +61,22 @@ def to_score_dict(scores, target_ids):
         return dict(zip(target_ids, scores))
 
     return {i: scores[i] for i in target_ids}
+
+def get_prob_structural(mutation_hyper_params):
+    if not isinstance(mutation_hyper_params, dict):
+        return 0.1
+    m_prob = mutation_hyper_params.get("mutate_prob", 0.95)
+    p_novel = mutation_hyper_params.get("add_novel_edge_prob", 5e-3)
+    p_grow_e = mutation_hyper_params.get("grow_edge_prob", 5e-4)
+    p_grow_n = mutation_hyper_params.get("grow_node_prob", 1e-5)
+    p_toggle = mutation_hyper_params.get("toggle_meta_edge_prob", 0.05)
+    p_act = mutation_hyper_params.get("change_activation_prob", 0.001)
+    p_node = mutation_hyper_params.get("add_remove_node_prob", 1e-5)
+
+    no_struct = (1.0 - p_novel) * (1.0 - p_grow_e) * (1.0 - p_grow_n) * (1.0 - p_toggle) * (1.0 - p_act) * (1.0 - p_node)
+    p_struct = m_prob * (1.0 - no_struct)
+    return float(np.clip(p_struct, 0.0, 1.0))
+
 
 # topology
 
@@ -116,6 +136,9 @@ class GeneticAlgorithm:
     def stats(self):
         return [get_topology_info(top_id) for top_id in self.all_top_ids]
 
+    def to_json(self):
+        return [get_population_json(top_id) for top_id in self.all_top_ids]
+
     def save_json(self, filename):
         for top_id in self.all_top_ids:
             save_json_to_file(top_id, f'{filename}.id.{top_id}.json')
@@ -133,6 +156,8 @@ class GeneticAlgorithm:
         simplicity_weight: float = 1.0,
         eps: float = 1e-8,
         brood_size: int = 1,
+        child_local_search_size: int = 1,
+        prob_structural_brood: float | None = None,
         eval_fn = None
     ):
         # 1. select for fitness, and occasionally simplicity as well
@@ -148,35 +173,86 @@ class GeneticAlgorithm:
 
         _, _, couples, target_nn_ids = select_and_tournament(self.all_top_ids, fitnesses.tolist(), selection_hyper_params)
 
-        # 3. produce the offsprings (brood selection will pick the best of several mutated variants, if brood size > 1)
+        # 3. produce the offsprings
+        # supports both Child Local Search (weight optimization on a fixed topology)
+        # and Synchronized Structural Broods (macro-level architectural exploration across competing structural hypotheses)
 
-        use_brood = brood_size > 1 and exists(eval_fn) and len(target_nn_ids) > 0
+        use_eval = (brood_size > 1 or child_local_search_size > 1) and exists(eval_fn) and len(target_nn_ids) > 0
 
-        if use_brood:
+        if use_eval:
+            if brood_size > 1:
+                p_struct = prob_structural_brood if exists(prob_structural_brood) else get_prob_structural(mutation_hyper_params)
+                is_structural_slot = [bool(bernoulli(p_struct)) for _ in target_nn_ids]
+                structural_targets = [tid for tid, is_s in zip(target_nn_ids, is_structural_slot) if is_s]
+                structural_couples = [c for c, is_s in zip(couples, is_structural_slot) if is_s]
+                parametric_targets = [tid for tid, is_s in zip(target_nn_ids, is_structural_slot) if not is_s]
+                parametric_couples = [c for c, is_s in zip(couples, is_structural_slot) if not is_s]
+            else:
+                structural_targets = []
+                structural_couples = []
+                parametric_targets = []
+                parametric_couples = []
+
             best_scores = {}
             best_offsprings = {}
 
-            for _ in range(brood_size):
-                crossover_and_add_to_population(self.all_top_ids, couples, target_nn_ids, crossover_hyper_params)
-                mutate_selected(self.all_top_ids, target_nn_ids, mutation_hyper_params)
+            for b in range(brood_size):
+                # 3a. Generate candidate topology for this sibling
+                if brood_size > 1:
+                    if len(structural_targets) > 0:
+                        crossover_and_add_to_population(self.all_top_ids, structural_couples, structural_targets, crossover_hyper_params)
+                        mutate_selected_structural_forced(self.all_top_ids, structural_targets, mutation_hyper_params)
 
-                scores = to_score_dict(eval_fn(self, target_nn_ids), target_nn_ids)
+                    if len(parametric_targets) > 0:
+                        crossover_and_add_to_population(self.all_top_ids, parametric_couples, parametric_targets, crossover_hyper_params)
+                else:
+                    crossover_and_add_to_population(self.all_top_ids, couples, target_nn_ids, crossover_hyper_params)
+                    mutate_selected_structural(self.all_top_ids, target_nn_ids, mutation_hyper_params)
 
-                for nn_id in target_nn_ids:
-                    score = scores[nn_id]
+                # 3b. Evaluate sibling (with optional child local search over weights)
+                if child_local_search_size > 1:
+                    base_arch = {
+                        tid: [clone_nn(top_id, tid) for top_id in self.all_top_ids]
+                        for tid in target_nn_ids
+                    }
+                    sib_best_scores = {}
+                    sib_best_offsprings = {}
 
-                    if nn_id not in best_scores or score > best_scores[nn_id]:
-                        best_scores[nn_id] = score
-                        best_offsprings[nn_id] = [clone_nn(top_id, nn_id) for top_id in self.all_top_ids]
+                    for k in range(child_local_search_size):
+                        for tid in target_nn_ids:
+                            for top_id, base_nn in zip(self.all_top_ids, base_arch[tid]):
+                                set_nn(top_id, tid, clone_nn_obj(base_nn))
+
+                        mutate_selected_weights(self.all_top_ids, target_nn_ids, mutation_hyper_params)
+                        scores = to_score_dict(eval_fn(self, target_nn_ids), target_nn_ids)
+
+                        for tid in target_nn_ids:
+                            score = scores[tid]
+                            if k == 0 or score > sib_best_scores[tid]:
+                                sib_best_scores[tid] = score
+                                sib_best_offsprings[tid] = [clone_nn(top_id, tid) for top_id in self.all_top_ids]
+
+                    for tid in target_nn_ids:
+                        score = sib_best_scores[tid]
+                        if b == 0 or score > best_scores[tid]:
+                            best_scores[tid] = score
+                            best_offsprings[tid] = sib_best_offsprings[tid]
+                else:
+                    mutate_selected_weights(self.all_top_ids, target_nn_ids, mutation_hyper_params)
+                    scores = to_score_dict(eval_fn(self, target_nn_ids), target_nn_ids)
+
+                    for tid in target_nn_ids:
+                        score = scores[tid]
+                        if b == 0 or score > best_scores[tid]:
+                            best_scores[tid] = score
+                            best_offsprings[tid] = [clone_nn(top_id, tid) for top_id in self.all_top_ids]
 
             # 4. commit the best offspring from each brood back into the population
-
-            for nn_id in target_nn_ids:
-                for top_id, offspring in zip(self.all_top_ids, best_offsprings[nn_id]):
-                    set_nn(top_id, nn_id, offspring)
+            for tid in target_nn_ids:
+                for top_id, offspring in zip(self.all_top_ids, best_offsprings[tid]):
+                    set_nn(top_id, tid, offspring)
 
             # 5. surviving elites are mutated (offsprings were already mutated as part of brood competition)
-
             mutate_survivors(self.all_top_ids, mutation_hyper_params)
         else:
             crossover_and_add_to_population(self.all_top_ids, couples, target_nn_ids, crossover_hyper_params)

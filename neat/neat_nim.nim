@@ -293,13 +293,18 @@ proc skip_hook*(T: typedesc[NeuralNetwork], key: static string): bool =
 proc skip_hook*(T: typedesc[Topology], key: static string): bool =
   key in ["conn_index", "edges_index", "nodes_index", "node_innovation_id", "edge_innovation_id"]
 
+proc get_population_json*(
+  top_id: int
+): string {.exportpy.} =
+  let top = topologies[top_id]
+  return $(top.nodes, top.edges, top.population).to_json()
+
 proc save_json_to_file*(
   top_id: int,
   filepath: string
 ) {.exportpy.} =
 
-  let top = topologies[top_id]
-  let contents = (top.nodes, top.edges, top.population).to_json()
+  let contents = get_population_json(top_id)
 
   let (dir, _, _) = split_file(filepath)
   if dir.len > 0 and not dir_exists(dir):
@@ -1253,31 +1258,17 @@ proc select_and_tournament(
 
   return (all_selected_indices, all_selected_fitnesses, all_parent_indices, all_target_nn_ids)
 
-proc mutate(
+proc mutate_weights*(
   top: Topology,
   nn_id: int,
   mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none
-) {.gcsafe exportpy.} =
+) =
   let hparams = mutation_hyper_params.get(top.mutation_hyper_params)
 
   let nn = top.population[nn_id]
 
   if not satisfy_prob(hparams.mutate_prob):
     return
-
-  var node_index = init_table[int, int]()
-  var edge_index = init_table[int, int]()
-
-  # snapshot for safe iteration; use top.conn_index for existence checks
-  var snapshot_conn_index = top.conn_index
-
-  # indexing global to local
-
-  for local_node_id, meta_node in nn.meta_nodes:
-    node_index[meta_node.node_id] = local_node_id
-
-  for local_edge_id, meta_edge in nn.meta_edges:
-    edge_index[meta_edge.edge_id] = local_edge_id
 
   let meta_nodes_len = nn.meta_nodes.len
   let meta_edges_len = nn.meta_edges.len
@@ -1318,18 +1309,11 @@ proc mutate(
         body
         idx += sample_waiting_time(rate)
 
-  # mutating nodes
+  # mutating node biases
 
   for i in 0 ..< meta_nodes_len:
     let node = nn.meta_nodes[i]
-
-    if node.can_disable and satisfy_prob(hparams.add_remove_node_prob):
-      node.disabled = not node.disabled
-
     if node.disabled: continue
-
-    if node.can_change_activation and satisfy_prob(hparams.change_activation_prob):
-      node.activation = rand_activation()
 
     if not hparams.use_fast_ga and satisfy_prob(hparams.change_node_bias_prob):
       perturb_value(node.bias, hparams.replace_node_bias_prob, bias_step.float, hparams.max_weight_magnitude)
@@ -1340,15 +1324,10 @@ proc mutate(
       if not node.disabled:
         perturb_value(node.bias, hparams.replace_node_bias_prob, bias_step.float, hparams.max_weight_magnitude)
 
-  # mutating edges
+  # mutating edge weights
 
   for i in 0 ..< meta_edges_len:
     let edge = nn.meta_edges[i]
-
-    if edge.can_disable and satisfy_prob(hparams.toggle_meta_edge_prob):
-      edge.disabled = not edge.disabled
-      if not edge.disabled: edge.weight = random_normal()
-
     if edge.disabled: continue
 
     if not hparams.use_fast_ga and satisfy_prob(hparams.change_edge_weight_prob):
@@ -1360,6 +1339,65 @@ proc mutate(
       if not edge.disabled:
         perturb_value(edge.weight, hparams.replace_edge_weight_prob, weight_step.float, hparams.max_weight_magnitude)
 
+  nn.cached_exec_trace = none(ExecTrace)
+
+proc mutate_structure*(
+  top: Topology,
+  nn_id: int,
+  mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none,
+  force: bool = false
+): bool {.discardable.} =
+  let hparams = mutation_hyper_params.get(top.mutation_hyper_params)
+
+  let nn = top.population[nn_id]
+
+  if not force and not satisfy_prob(hparams.mutate_prob):
+    return false
+
+  var node_index = init_table[int, int]()
+  var edge_index = init_table[int, int]()
+
+  # snapshot for safe iteration; use top.conn_index for existence checks
+  var snapshot_conn_index = top.conn_index
+
+  # indexing global to local
+
+  for local_node_id, meta_node in nn.meta_nodes:
+    node_index[meta_node.node_id] = local_node_id
+
+  for local_edge_id, meta_edge in nn.meta_edges:
+    edge_index[meta_edge.edge_id] = local_edge_id
+
+  let meta_nodes_len = nn.meta_nodes.len
+  let meta_edges_len = nn.meta_edges.len
+
+  var mutated = false
+
+  # mutating nodes: enable/disable and activation changes
+
+  for i in 0 ..< meta_nodes_len:
+    let node = nn.meta_nodes[i]
+
+    if node.can_disable and satisfy_prob(hparams.add_remove_node_prob):
+      node.disabled = not node.disabled
+      mutated = true
+
+    if node.disabled: continue
+
+    if node.can_change_activation and satisfy_prob(hparams.change_activation_prob):
+      node.activation = rand_activation()
+      mutated = true
+
+  # mutating edges: enable/disable toggle
+
+  for i in 0 ..< meta_edges_len:
+    let edge = nn.meta_edges[i]
+
+    if edge.can_disable and satisfy_prob(hparams.toggle_meta_edge_prob):
+      edge.disabled = not edge.disabled
+      if not edge.disabled: edge.weight = random_normal()
+      mutated = true
+
   # helper for creating & indexing new meta edges
 
   template add_meta_edge(e_id, from_id, to_id: int, w: float32) =
@@ -1370,11 +1408,8 @@ proc mutate(
       weight: w
     ))
 
-  # structural mutations - fired ONCE per individual, not per node/edge
-
-  if satisfy_prob(hparams.grow_node_prob):
+  template do_grow_node() =
     var active_nodes: seq[int] = @[]
-
     for i in 0 ..< meta_nodes_len:
       let node = nn.meta_nodes[i]
       if node.disabled: continue
@@ -1404,8 +1439,9 @@ proc mutate(
       for new_edge_id in new_edge_ids:
         let edge = top.edges[new_edge_id]
         add_meta_edge(new_edge_id, node_index[edge.from_node_id], node_index[edge.to_node_id], random_normal())
+      mutated = true
 
-  if satisfy_prob(hparams.grow_edge_prob):
+  template do_grow_edge() =
     var active_edges: seq[int] = @[]
     for i in 0 ..< meta_edges_len:
       if not nn.meta_edges[i].disabled: active_edges.add(i)
@@ -1433,8 +1469,9 @@ proc mutate(
 
       add_meta_edge(edge_id1, meta_edge.local_from_node_id, new_local_node_id, 1.0)
       add_meta_edge(edge_id2, new_local_node_id, meta_edge.local_to_node_id, meta_edge.weight)
+      mutated = true
 
-  if satisfy_prob(hparams.add_novel_edge_prob):
+  template do_add_novel_edge() =
     var active_nodes: seq[int] = @[]
     for i in 0 ..< nn.meta_nodes.len:
       if not nn.meta_nodes[i].disabled: active_nodes.add(i)
@@ -1457,8 +1494,46 @@ proc mutate(
           add_meta_edge(edge_id, from_local, to_local, random_normal())
         else:
           nn.meta_edges[edge_index[edge_id]].disabled = false
+        mutated = true
 
-  nn.cached_exec_trace = none(ExecTrace)
+  # structural mutations - fired ONCE per individual, not per node/edge
+
+  if satisfy_prob(hparams.grow_node_prob):
+    do_grow_node()
+
+  if satisfy_prob(hparams.grow_edge_prob):
+    do_grow_edge()
+
+  if satisfy_prob(hparams.add_novel_edge_prob):
+    do_add_novel_edge()
+
+  if force and not mutated:
+    let r = rand(2)
+    if r == 0:
+      do_grow_edge()
+      if not mutated: do_add_novel_edge()
+      if not mutated: do_grow_node()
+    elif r == 1:
+      do_add_novel_edge()
+      if not mutated: do_grow_edge()
+      if not mutated: do_grow_node()
+    else:
+      do_grow_node()
+      if not mutated: do_grow_edge()
+      if not mutated: do_add_novel_edge()
+
+  if mutated:
+    nn.cached_exec_trace = none(ExecTrace)
+
+  return mutated
+
+proc mutate(
+  top: Topology,
+  nn_id: int,
+  mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none
+) {.gcsafe exportpy.} =
+  mutate_weights(top, nn_id, mutation_hyper_params)
+  discard mutate_structure(top, nn_id, mutation_hyper_params)
 
 proc mutate(
   top_id: int,
@@ -1771,6 +1846,9 @@ proc set_nn*(top_id: int, nn_id: int, nn: NeuralNetwork) {.exportpy.} =
   top.population[nn_id] = nn
   top.population[nn_id].cached_exec_trace = none(ExecTrace)
 
+proc clone_nn_obj*(nn: NeuralNetwork): NeuralNetwork {.exportpy.} =
+  return nn.clone()
+
 proc mutate_selected*(
   all_top_ids: seq[int],
   nn_ids: seq[int],
@@ -1780,6 +1858,39 @@ proc mutate_selected*(
     let top = topologies[top_id]
     for nn_id in nn_ids:
       mutate(top, nn_id, mutation_hyper_params)
+    set_population_exec_trace(top_id)
+
+proc mutate_selected_weights*(
+  all_top_ids: seq[int],
+  nn_ids: seq[int],
+  mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none
+) {.exportpy.} =
+  for top_id in all_top_ids:
+    let top = topologies[top_id]
+    for nn_id in nn_ids:
+      mutate_weights(top, nn_id, mutation_hyper_params)
+    set_population_exec_trace(top_id)
+
+proc mutate_selected_structural*(
+  all_top_ids: seq[int],
+  nn_ids: seq[int],
+  mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none
+) {.exportpy.} =
+  for top_id in all_top_ids:
+    let top = topologies[top_id]
+    for nn_id in nn_ids:
+      discard mutate_structure(top, nn_id, mutation_hyper_params)
+    set_population_exec_trace(top_id)
+
+proc mutate_selected_structural_forced*(
+  all_top_ids: seq[int],
+  nn_ids: seq[int],
+  mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none
+) {.exportpy.} =
+  for top_id in all_top_ids:
+    let top = topologies[top_id]
+    for nn_id in nn_ids:
+      discard mutate_structure(top, nn_id, mutation_hyper_params, force = true)
     set_population_exec_trace(top_id)
 
 proc mutate_survivors*(
@@ -1830,6 +1941,9 @@ proc migrate_islands*(
 
             for j in 0 ..< num_migrants:
               new_pop[curr_offset + island_pop_size - 1 - j] = top.population[prev_offset + j].clone()
+
+          for k in (num_islands * island_pop_size) ..< pop_size:
+            new_pop[k] = top.population[k]
 
           top.population = new_pop
           set_population_exec_trace(top_id)
