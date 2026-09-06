@@ -10,10 +10,56 @@ In project root, run
 $ sh install.sh
 ```
 
+## usage
+
+Distill / behavior-clone an evolved champion NEAT network into any barebones PyTorch MLP:
+
+```python
+import torch
+import torch.nn as nn
+import gymnasium as gym
+
+from neat import NEAT, behavior_clone
+
+# 1. train NEAT on an environment
+
+env = gym.make('CartPole-v1')
+pop = NEAT(4, 16, 2, pop_size = 64)
+
+# ... evolve population ...
+
+# 2. extract champion network
+
+champion = pop.champion
+
+# 3. define any barebones PyTorch MLP
+
+mlp = nn.Sequential(
+    nn.Linear(4, 32),
+    nn.Tanh(),
+    nn.Linear(32, 2)
+)
+
+# 4. behavior clone and save .pt to project root
+
+behavior_clone(
+    env,
+    champion,
+    mlp,
+    save_path = 'mlp-cartpole.pt'  # saved directly to project root
+)
+```
+
 ## quick test
 
 ```bash
 $ uv run train_lunar.py
+```
+
+To run the end-to-end CartPole evolution, behavior cloning, and validation:
+
+```bash
+$ uv run train_bc_cartpole.py
 ```
 
 ## citations

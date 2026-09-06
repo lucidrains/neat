@@ -1,4 +1,7 @@
 from neat.neat import (
     NEAT,
-    Topology
+    Topology,
+    Network,
+    behavior_clone
 )
+

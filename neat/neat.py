@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+import torch
+import torch.nn.functional as F
+from torch.optim import Adam
+from tqdm import tqdm
+
+from env_ssl_wrapper import StandardizeEnvWrapper, action_space_is_discrete
 
 import nimporter_plus
 
@@ -38,6 +46,9 @@ def exists(v):
 
 def default(v, d):
     return v if exists(v) else d
+
+def divisible_by(num, den):
+    return (num % den) == 0
 
 def log(t, eps = 1e-20):
     return np.log(np.clip(t, a_min = eps, a_max = None))
@@ -132,7 +143,37 @@ class Topology:
         except Exception:
             pass
 
+# network
+
+class Network:
+    def __init__(self, pop, index: int):
+        self.pop = pop
+        self.index = index
+
+    def forward(self, state, *args, **kwargs):
+        if isinstance(state, (list, tuple)):
+            state = np.asarray(state, dtype = np.float32)
+
+        return self.pop.single_forward(self.index, state, *args, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def reset(self):
+        self.pop.reset_recurrent_state()
+
+    def __repr__(self):
+        return f'Network(index = {self.index})'
+
+# genetic algorithm
+
 class GeneticAlgorithm:
+    def __init__(self):
+        self.champion_index = None
+
+    def reset_recurrent_state(self):
+        pass
+
     def stats(self):
         return [get_topology_info(top_id) for top_id in self.all_top_ids]
 
@@ -142,6 +183,14 @@ class GeneticAlgorithm:
     def save_json(self, filename):
         for top_id in self.all_top_ids:
             save_json_to_file(top_id, f'{filename}.id.{top_id}.json')
+
+    def __getitem__(self, index: int) -> Network:
+        return Network(self, index)
+
+    @property
+    def champion(self) -> Network:
+        assert exists(self.champion_index), 'must call genetic_algorithm_step with fitnesses before accessing champion'
+        return self[self.champion_index]
 
     def genetic_algorithm_step(
         self,
@@ -163,6 +212,7 @@ class GeneticAlgorithm:
         # 1. select for fitness, and occasionally simplicity as well
 
         fitnesses = np.asarray(fitnesses)
+        self.champion_index = int(np.argmax(fitnesses))
 
         if bernoulli(prob_weigh_complexity_as_fitness):
             complexities = np.array(get_population_complexities(self.all_top_ids[0]))
@@ -278,6 +328,7 @@ class NEAT(GeneticAlgorithm):
         num_recurrent = 0
     ):
         assert len(dims) >= 2
+        super().__init__()
 
         dim_in = dims[0]
         dim_out = dims[-1]
@@ -371,3 +422,188 @@ class NEAT(GeneticAlgorithm):
             target.tolist(),
             learning_rate
         )
+
+# behavior cloning
+
+def behavior_clone(
+    env,
+    champion,
+    mlp,
+    save_path: str | Path = 'mlp.pt',
+    *,
+    iterations: int = 20,
+    rollouts_per_iter: int = 4,
+    epochs: int = 4,
+    batch_size: int = 64,
+    lr: float = 1e-3,
+    student_action_prob: float = 0.2,
+    max_steps: int = 1000,
+    target_ratio: float = 0.95,
+    min_reward: float | None = None,
+    discrete: bool | None = None,
+    eval_every: int = 5,
+    eval_episodes: int = 5,
+    eval_seed: int = 42,
+    device: str = 'cpu',
+    show_progress: bool = True,
+    verbose: bool = True
+):
+    # standardize environment
+
+    if not isinstance(env, StandardizeEnvWrapper):
+        env = StandardizeEnvWrapper(env, device = device)
+
+    # resolve teacher policy callable and reset
+
+    if isinstance(champion, GeneticAlgorithm):
+        champion = champion.champion
+
+    if isinstance(champion, Network):
+        teacher_policy = champion
+        teacher_reset = champion.reset
+    elif isinstance(champion, tuple) and len(champion) == 2:
+        pop, idx = champion
+        teacher_policy = lambda obs: pop.single_forward(idx, obs, sample = False)
+        teacher_reset = pop.reset_recurrent_state
+    elif callable(champion):
+        teacher_policy = champion
+        teacher_reset = None
+    else:
+        raise ValueError(f'Unsupported champion type: {type(champion)}')
+
+    # determine if action space is discrete or continuous
+
+    discrete = default(discrete, action_space_is_discrete(env.action_space))
+
+    device = torch.device(device)
+    mlp = mlp.to(device)
+    optimizer = Adam(mlp.parameters(), lr = lr)
+
+    def action_from_teacher(t_out):
+        if discrete:
+            return int(np.argmax(t_out)) if (isinstance(t_out, np.ndarray) and t_out.size > 1) else int(t_out)
+        return torch.from_numpy(np.asarray(t_out, dtype = np.float32)).to(device)
+
+    def student_act(obs):
+        with torch.no_grad():
+            out = mlp(obs).squeeze(0)
+
+        if discrete:
+            return int(out.argmax())
+        return out
+
+    # loss function
+
+    loss_fn = F.cross_entropy if discrete else F.mse_loss
+
+    def evaluate(policy, reset_fn = None, num_episodes = eval_episodes, start_seed = eval_seed):
+        rewards = []
+
+        for episode in range(num_episodes):
+            if callable(reset_fn):
+                reset_fn()
+
+            obs, _ = env.reset(seed = start_seed + episode)
+            episode_reward = 0.0
+
+            for _ in range(max_steps):
+                action = policy(obs)
+                obs, reward, *_ = env.step(action)
+                episode_reward += float(reward.sum().item())
+
+                if env.all_done:
+                    break
+
+            rewards.append(episode_reward)
+
+        return float(np.mean(rewards)), float(np.std(rewards))
+
+    # evaluate teacher baseline
+
+    teacher_policy_fn = lambda obs: action_from_teacher(teacher_policy(obs.squeeze(0).cpu().numpy()))
+    teacher_reward, teacher_std = evaluate(teacher_policy_fn, reset_fn = teacher_reset)
+
+    threshold = default(
+        min_reward,
+        teacher_reward * target_ratio if teacher_reward >= 0. else teacher_reward * (1. - target_ratio)
+    )
+
+    if verbose:
+        print(f'teacher reward: {teacher_reward:.2f} ± {teacher_std:.2f} | target: {threshold:.2f}')
+
+    # DAgger behavior cloning loop
+
+    pbar = range(iterations)
+    if show_progress:
+        pbar = tqdm(pbar, desc = 'behavior cloning')
+
+    all_states = []
+    all_targets = []
+
+    for it in pbar:
+        for _ in range(rollouts_per_iter):
+            if callable(teacher_reset):
+                teacher_reset()
+
+            obs, _ = env.reset()
+
+            for _ in range(max_steps):
+                teacher_output = teacher_policy(obs.squeeze(0).cpu().numpy())
+                teacher_action = action_from_teacher(teacher_output)
+
+                all_states.append(obs.squeeze(0).detach().cpu())
+                all_targets.append(teacher_action)
+
+                action = student_act(obs) if (it > 0 and np.random.rand() < student_action_prob) else teacher_action
+
+                obs, *_ = env.step(action)
+                if env.all_done:
+                    break
+
+        if len(all_states) == 0:
+            continue
+
+        states_t = torch.stack(all_states).to(device)
+
+        if discrete:
+            targets_t = torch.tensor(all_targets, dtype = torch.long, device = device)
+        else:
+            targets_t = torch.stack([torch.as_tensor(t, device = device) for t in all_targets])
+
+        # train
+
+        num_samples = states_t.shape[0]
+        curr_batch_size = min(batch_size, num_samples)
+
+        mlp.train()
+        for _ in range(epochs):
+            perm = torch.randperm(num_samples)
+            for start in range(0, num_samples, curr_batch_size):
+                idx = perm[start:start + curr_batch_size]
+                loss = loss_fn(mlp(states_t[idx]), targets_t[idx])
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+        # check performance against environment
+
+        if divisible_by(it + 1, eval_every) or it == iterations - 1:
+            mlp.eval()
+            student_reward, _ = evaluate(student_act)
+
+            if student_reward >= threshold:
+                if verbose:
+                    print(f'reached target: mlp reward {student_reward:.2f} >= {threshold:.2f}')
+                break
+
+    # save
+
+    save_path = Path(save_path)
+    save_path.parent.mkdir(parents = True, exist_ok = True)
+    torch.save(mlp.state_dict(), str(save_path))
+
+    if verbose:
+        print(f'saved cloned mlp to {save_path}')
+
+    return mlp

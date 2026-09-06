@@ -1,6 +1,6 @@
 [project]
 name = "x-neat"
-version = "0.0.6"
+version = "0.0.7"
 description = "NEAT"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -23,9 +23,11 @@ classifiers=[
 ]
 
 dependencies = [
+    "env-ssl-wrapper>=0.4.0",
     "nimporter-plus>=0.0.6",
     "numpy",
-    "setuptools"
+    "setuptools",
+    "tqdm"
 ]
 
 [project.urls]
