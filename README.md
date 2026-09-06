@@ -121,6 +121,18 @@ $ uv run train_lunar.py
     year    = {2024},
     publisher = {Public Library of Science},
     doi     = {10.1371/journal.pone.0307084},
-    url     ={https://doi.org/10.1371/journal.pone.0307084}
+    url     = {https://doi.org/10.1371/journal.pone.0307084}
+}
+```
+
+```bibtex
+@inproceedings{tackett1994unique,
+    title     = {The unique implications of brood selection for genetic programming},
+    author    = {Tackett, Walter Alden and Carmi, Aviram},
+    booktitle = {Proceedings of the First IEEE Conference on Evolutionary Computation. IEEE World Congress on Computational Intelligence},
+    pages     = {160--165},
+    year      = {1994},
+    organization = {IEEE},
+    doi       = {10.1109/ICEC.1994.350030}
 }
 ```

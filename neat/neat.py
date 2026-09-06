@@ -5,22 +5,26 @@ import numpy as np
 import nimporter_plus
 
 from neat.neat_nim import (
-    add_topology,
-    remove_topology,
-    init_population as init_population_nim,
-    crossover_and_add_to_population,
-    select_and_tournament,
-    add_node,
     add_edge,
-    mutate_all,
-    migrate_islands as migrate_nim,
-    reset_top_islands as reset_islands_nim,
-    evaluate_nn_single,
+    add_node,
+    add_topology,
     backprop_nn_single,
+    clone_nn,
+    crossover_and_add_to_population,
+    evaluate_nn_single,
     evaluate_population,
+    get_population_complexities,
     get_topology_info,
+    init_population as init_population_nim,
+    migrate_islands as migrate_nim,
+    mutate_all,
+    mutate_selected,
+    mutate_survivors,
+    remove_topology,
+    reset_top_islands as reset_islands_nim,
     save_json_to_file,
-    get_population_complexities
+    select_and_tournament,
+    set_nn
 )
 
 # functions
@@ -37,15 +41,22 @@ def log(t, eps = 1e-20):
 def bernoulli(p):
     return np.random.binomial(1, p)
 
-# sampling
-
-def gumbel_sample(t, temperature = 1., eps = 1e-20):
+def gumbel_sample(logits, temperature = 1., eps = 1e-20):
     if temperature > 0.:
-        t = t / temperature
-        u = np.random.uniform(0., 1., t.shape).astype(np.float32).clip(eps, 1. - eps)
-        t = t - log(-log(u, eps), eps)
+        logits = logits / temperature
+        u = np.random.uniform(0., 1., logits.shape).astype(np.float32).clip(eps, 1. - eps)
+        logits = logits - log(-log(u, eps), eps)
 
-    return t.argmax(axis = -1).tolist()
+    return logits.argmax(axis = -1).tolist()
+
+def to_score_dict(scores, target_ids):
+    if isinstance(scores, dict):
+        return scores
+
+    if len(scores) == len(target_ids):
+        return dict(zip(target_ids, scores))
+
+    return {i: scores[i] for i in target_ids}
 
 # topology
 
@@ -66,6 +77,12 @@ class Topology:
         if isinstance(num_hiddens, int):
             num_hiddens = (num_hiddens,)
 
+        self.pop_size = pop_size
+        self.shape = shape
+
+        if exists(shape):
+            assert len(shape) == num_inputs
+
         self.id = add_topology(
             num_inputs,
             num_outputs,
@@ -77,16 +94,7 @@ class Topology:
             num_recurrent
         )
 
-        self.init_population(pop_size)
-
-        self.pop_size = pop_size
-        self.shape = shape
-
-        if exists(shape):
-            assert len(shape) == num_inputs
-
-    def __del__(self):
-        remove_topology(self.id)
+        init_population_nim(self.id, pop_size)
 
     def init_population(self, pop_size):
         return init_population_nim(self.id, pop_size)
@@ -96,6 +104,13 @@ class Topology:
 
     def add_synapse(self, from_id, to_id):
         return add_edge(self.id, from_id, to_id)
+
+    def __del__(self):
+        try:
+            if exists(self.id):
+                remove_topology(self.id)
+        except Exception:
+            pass
 
 class GeneticAlgorithm:
     def stats(self):
@@ -116,46 +131,64 @@ class GeneticAlgorithm:
         reset_islands_tournament_size = 3,
         prob_weigh_complexity_as_fitness: float = 0.0,
         simplicity_weight: float = 1.0,
-        eps: float = 1e-8
+        eps: float = 1e-8,
+        brood_size: int = 1,
+        eval_fn = None
     ):
+        # 1. select for fitness, and occasionally simplicity as well
 
-        # 1. selection
-        # 2. tournament -> parent pairs
+        fitnesses = np.asarray(fitnesses)
 
-        weigh_complexity_as_fitness = bernoulli(prob_weigh_complexity_as_fitness)
-
-        if weigh_complexity_as_fitness:
+        if bernoulli(prob_weigh_complexity_as_fitness):
             complexities = np.array(get_population_complexities(self.all_top_ids[0]))
-            simplicity_fitness_score = 1.0 / (complexities + eps)
-            fitnesses_list = (fitnesses + simplicity_weight * simplicity_fitness_score).tolist()
+            simplicity_scores = 1.0 / (complexities + eps)
+            fitnesses = fitnesses + simplicity_weight * simplicity_scores
+
+        # 2. select surviving elites and pairing parents, and determine which offsprings will replace which individuals
+
+        _, _, couples, target_nn_ids = select_and_tournament(self.all_top_ids, fitnesses.tolist(), selection_hyper_params)
+
+        # 3. produce the offsprings (brood selection will pick the best of several mutated variants, if brood size > 1)
+
+        use_brood = brood_size > 1 and exists(eval_fn) and len(target_nn_ids) > 0
+
+        if use_brood:
+            best_scores = {}
+            best_offsprings = {}
+
+            for _ in range(brood_size):
+                crossover_and_add_to_population(self.all_top_ids, couples, target_nn_ids, crossover_hyper_params)
+                mutate_selected(self.all_top_ids, target_nn_ids, mutation_hyper_params)
+
+                scores = to_score_dict(eval_fn(self, target_nn_ids), target_nn_ids)
+
+                for nn_id in target_nn_ids:
+                    score = scores[nn_id]
+
+                    if nn_id not in best_scores or score > best_scores[nn_id]:
+                        best_scores[nn_id] = score
+                        best_offsprings[nn_id] = [clone_nn(top_id, nn_id) for top_id in self.all_top_ids]
+
+            # 4. commit the best offspring from each brood back into the population
+
+            for nn_id in target_nn_ids:
+                for top_id, offspring in zip(self.all_top_ids, best_offsprings[nn_id]):
+                    set_nn(top_id, nn_id, offspring)
+
+            # 5. surviving elites are mutated (offsprings were already mutated as part of brood competition)
+
+            mutate_survivors(self.all_top_ids, mutation_hyper_params)
         else:
-            fitnesses_list = fitnesses.tolist()
+            crossover_and_add_to_population(self.all_top_ids, couples, target_nn_ids, crossover_hyper_params)
+            mutate_all(self.all_top_ids, mutation_hyper_params)
 
-        (
-            sel_indices,
-            sel_fitnesses,
-            couples,
-            target_nn_ids
-        ) = select_and_tournament(self.all_top_ids, fitnesses_list, selection_hyper_params)
-
-        # 3. compute children with crossover
-        # 4. concat children to population
-
-        crossover_and_add_to_population(self.all_top_ids, couples, target_nn_ids, crossover_hyper_params)
-
-        # 5. migration
+        # 6. migrate individuals between islands, occasionally resetting the worst islands
 
         if migrate_num > 0:
             migrate_nim(self.all_top_ids, migrate_num)
 
-        # 6. island reset
-
         if reset_islands_num > 0:
-            reset_islands_nim(self.all_top_ids, fitnesses_list, reset_islands_num, reset_islands_tournament_size)
-
-        # 7. mutation
-
-        mutate_all(self.all_top_ids, mutation_hyper_params)
+            reset_islands_nim(self.all_top_ids, fitnesses.tolist(), reset_islands_num, reset_islands_tournament_size)
 
 class NEAT(GeneticAlgorithm):
     def __init__(
@@ -168,7 +201,6 @@ class NEAT(GeneticAlgorithm):
         num_islands = 1,
         num_recurrent = 0
     ):
-        self.dims = dims
         assert len(dims) >= 2
 
         dim_in = dims[0]
@@ -177,8 +209,9 @@ class NEAT(GeneticAlgorithm):
 
         self.dim_out = dim_out
         self.num_recurrent = num_recurrent
-
-        self.output = np.empty((pop_size, self.dim_out + self.num_recurrent), dtype = np.float32)
+        self.output = np.empty((pop_size, dim_out + num_recurrent), dtype = np.float32)
+        self.recurrent_state = None
+        self.single_recurrent_state = None
 
         self.top = Topology(
             dim_in,
@@ -191,10 +224,8 @@ class NEAT(GeneticAlgorithm):
             num_islands = num_islands,
             num_recurrent = num_recurrent
         )
-        self.all_top_ids = [self.top.id]
 
-        self.recurrent_state = None
-        self.single_recurrent_state = None
+        self.all_top_ids = [self.top.id]
 
     def reset_recurrent_state(self):
         self.recurrent_state = None

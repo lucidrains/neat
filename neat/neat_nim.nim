@@ -1,7 +1,6 @@
 import std/[
   random,
   times,
-  strformat,
   options,
   assertions,
   math,
@@ -34,23 +33,6 @@ type
 
 randomize()
 
-# templates
-
-template benchmark(
-  name: string,
-  trials: int,
-  code: untyped
-) =
-  var result = 0.0
-
-  for _ in 0..<trials:
-    let start_time = epoch_time()
-    code
-    let diff = epoch_time() - start_time
-    result += diff / trials
-
-  echo name & ": average time over " & $trials & " trials is " & $(result * 1e3) & " ms"
-
 # from @Vindaar - https://github.com/yglukhov/nimpy/issues/114#issuecomment-531504502
 
 type
@@ -73,22 +55,10 @@ proc init_nd_array[T](ar: PyObject): NumpyArray[T] =
   result.data = cast[ptr UncheckedArray[T]](result.py_buf.buf)
 
 proc release[T](nd: var NumpyArray[T]) =
-  nd.py_buf[].release()
-  dealloc(nd.py_buf)
-
-template parse_indices(
-  indices: seq[int],
-  shape: seq[int]
-): int =
-  var
-    res = 0
-    stride = 1
-
-  for i in countdown(indices.high, 0):
-    res += indices[i] * stride
-    stride *= shape[i]
-
-  res
+  if not nd.py_buf.is_nil:
+    nd.py_buf[].release()
+    dealloc(nd.py_buf)
+    nd.py_buf = nil
 
 # functions
 
@@ -116,18 +86,17 @@ proc sample_power_law(half_len: int, beta: float): int =
     if r <= cumsum: return k
   half_len
 
-proc sample_waiting_time(prob: float): int =
+proc sample_waiting_time*(prob: float): int =
   ## geometric skip - number of trials until first success
   if prob <= 0.0: return int.high
   if prob >= 1.0: return 1
-  1 + (ln(1.0 - max(rand(1.0), 1e-15)) / ln(1.0 - prob)).floor.int
+  1 + (ln(max(1.0 - rand(1.0), 1e-15)) / ln(1.0 - prob)).floor.int
 
 # activation functions
 
 proc sigmoid(x: float32): float32 = 1.0 / (1.0 + exp(-x))
 proc relu(x: float32): float32 = max(x, 0.0)
 proc gauss(x: float32): float32 = exp(-pow(x, 2))
-proc identity(x: float32): float32 = x
 proc elu(x: float32): float32 = (if x >= 0.0: x else: exp(x) - 1.0)
 proc clamp_one(x: float32): float32 = max(min(x, 1.0), -1.0)
 
@@ -280,9 +249,9 @@ type
 
   Couples* = seq[Couple]
 
-  TopologyInfo = object
-    total_innovated_nodes: int
-    total_innovated_edges: int
+  TopologyInfo* = object
+    total_innovated_nodes*: int
+    total_innovated_edges*: int
 
 # globals
 
@@ -291,16 +260,16 @@ var topology_id: Atomic[int]
 
 # helper accessors
 
-proc get_topology_info(
+proc get_topology_info*(
   top_id: int
 ): TopologyInfo {.exportpy.} =
 
   let top = topologies[top_id]
 
-  result.total_innovated_nodes = top.node_innovation_id.load + 1
-  result.total_innovated_edges = top.edge_innovation_id.load + 1
+  result.total_innovated_nodes = top.node_innovation_id.load
+  result.total_innovated_edges = top.edge_innovation_id.load
 
-proc get_population_complexities(
+proc get_population_complexities*(
   top_id: int
 ): seq[float32] {.exportpy.} =
 
@@ -324,7 +293,7 @@ proc skip_hook*(T: typedesc[NeuralNetwork], key: static string): bool =
 proc skip_hook*(T: typedesc[Topology], key: static string): bool =
   key in ["conn_index", "edges_index", "nodes_index", "node_innovation_id", "edge_innovation_id"]
 
-proc save_json_to_file(
+proc save_json_to_file*(
   top_id: int,
   filepath: string
 ) {.exportpy.} =
@@ -332,8 +301,8 @@ proc save_json_to_file(
   let top = topologies[top_id]
   let contents = (top.nodes, top.edges, top.population).to_json()
 
-  let (dir, name, ext) = split_file(filepath)
-  if not dir_exists(dir):
+  let (dir, _, _) = split_file(filepath)
+  if dir.len > 0 and not dir_exists(dir):
     create_dir(dir)
 
   write_file(filepath, contents.parse_json().pretty())
@@ -347,11 +316,11 @@ proc activate(act: Activation, input: Tensor[float32]): Tensor[float32] {.gcsafe
 proc activate(act: Activation, input: float32): float32 {.gcsafe.}
 proc activate(node: MetaNode, input: Tensor[float32]): Tensor[float32] {.gcsafe.}
 
-proc set_population_exec_trace(top_id: int)
+proc set_population_exec_trace*(top_id: int)
 
 proc rand_activation(): Activation
 
-proc add_topology(
+proc add_topology*(
   num_inputs: int,
   num_outputs: int,
   num_hiddens: seq[int],
@@ -408,7 +377,7 @@ proc add_topology(
 
   # initial pool of hidden nodes and edges, all disabled for new neural networks at start
 
-  var hidden_node_ids: seq[int] = @[]
+  var hidden_node_ids: seq[seq[int]] = @[]
 
   for num_hidden_layer in num_hiddens:
     var layer_hidden_ids: seq[int] = @[]
@@ -418,15 +387,16 @@ proc add_topology(
 
     hidden_node_ids.add(layer_hidden_ids)
 
-  var all_ids: seq[seq[int]] = @[orig_input_node_ids] & hidden_node_ids & @[orig_output_node_ids]
+  if hidden_node_ids.len > 0:
+    let all_ids = @[orig_input_node_ids] & hidden_node_ids & @[orig_output_node_ids]
 
-  for layer_index, from_layer_ids in all_ids[0..^2]:
+    for layer_index in 0 ..< all_ids.len - 1:
+      let from_layer_ids = all_ids[layer_index]
+      let to_layer_ids = all_ids[layer_index + 1]
 
-    let to_layer_ids = all_ids[layer_index + 1]
-
-    for from_id in from_layer_ids:
-      for to_id in to_layer_ids:
-        discard add_edge(topology, from_id, to_id)
+      for from_id in from_layer_ids:
+        for to_id in to_layer_ids:
+          discard add_edge(topology, from_id, to_id)
 
   # return id
 
@@ -591,9 +561,10 @@ proc init_nn(
 
 proc init_population(
   top_id: int,
-  pop_size: range[1..int.high],
+  pop_size: int,
 ) {.exportpy.} =
 
+  assert pop_size > 0
   let top = topologies[top_id]
   assert top.pop_size == 0
 
@@ -960,9 +931,9 @@ proc evaluate_nn_single_with_trace_thread_fn(
   for i in 0 ..< num_outputs:
     buffer_output[i] = thread_local_values[num_inputs + i]
 
-proc set_population_exec_trace(
+proc set_population_exec_trace*(
   top_id: int
-) =
+) {.exportpy.} =
   let top = topologies[top_id]
 
   for nn_id in 0 ..< top.population.len:
@@ -983,32 +954,38 @@ proc evaluate_population(
   var nd_array_inputs = init_nd_array[float32](inputs)
   var nd_array_outputs = init_nd_array[float32](outputs)
 
-  # validate expected shapes
-  assert nd_array_inputs.shape.len == 2
-  assert nd_array_outputs.shape.len == 2
-  assert nd_array_inputs.shape[0] == top.pop_size
-  assert nd_array_inputs.shape[1] == top.num_inputs
-  assert nd_array_outputs.shape[0] == top.pop_size
-  assert nd_array_outputs.shape[1] == top.num_outputs
+  try:
+    # validate expected shapes
+    assert nd_array_inputs.shape.len == 2
+    assert nd_array_outputs.shape.len == 2
+    assert nd_array_inputs.shape[0] == top.pop_size
+    assert nd_array_inputs.shape[1] == top.num_inputs
+    assert nd_array_outputs.shape[0] == top.pop_size
+    assert nd_array_outputs.shape[1] == top.num_outputs
 
-  let num_inputs = top.num_inputs
-  let num_outputs = top.num_outputs
+    let num_inputs = top.num_inputs
+    let num_outputs = top.num_outputs
 
-  master.await_all:
     for nn_id in 0 ..< top.pop_size:
       let nn = top.population[nn_id]
+      if nn.cached_exec_trace.is_none:
+        nn.cached_exec_trace = evaluate_nn_exec_trace(top.id, nn_id).some
 
-      let buffer_input = cast[ptr UncheckedArray[float32]](nd_array_inputs.data[nn_id * num_inputs].addr)
-      let buffer_output = cast[ptr UncheckedArray[float32]](nd_array_outputs.data[nn_id * num_outputs].addr)
+    master.await_all:
+      for nn_id in 0 ..< top.pop_size:
+        let nn = top.population[nn_id]
 
-      master.spawn evaluate_nn_single_with_trace_thread_fn(
-        cast[pointer](nn.cached_exec_trace.get),
-        buffer_input,
-        buffer_output
-      )
+        let buffer_input = cast[ptr UncheckedArray[float32]](nd_array_inputs.data[nn_id * num_inputs].addr)
+        let buffer_output = cast[ptr UncheckedArray[float32]](nd_array_outputs.data[nn_id * num_outputs].addr)
 
-  nd_array_inputs.release()
-  nd_array_outputs.release()
+        master.spawn evaluate_nn_single_with_trace_thread_fn(
+          cast[pointer](nn.cached_exec_trace.get),
+          buffer_input,
+          buffer_output
+        )
+  finally:
+    nd_array_inputs.release()
+    nd_array_outputs.release()
 
 proc activate(
   node: MetaNode,
@@ -1153,15 +1130,19 @@ proc fuss_couples*(fitnesses: seq[float32], num_couples: int, eps = 1e-5'f32): C
     cdf[i] = sum
 
   for _ in 0 ..< num_couples:
-    let p1 = sorted[lower_bound(cdf, rand(sum))][1]
-    let p2 = sorted[lower_bound(cdf, rand(sum))][1]
+    let p1 = sorted[min(lower_bound(cdf, rand(sum)), pop_size - 1)][1]
+    let p2 = sorted[min(lower_bound(cdf, rand(sum)), pop_size - 1)][1]
     result.add(((p1, fitnesses[p1]), (p2, fitnesses[p2])))
 
 proc tournament*(
   fitnesses: seq[float32],
-  num_tournaments: range[1..int.high],
-  tournament_size: range[2..int.high]
+  num_tournaments: int,
+  tournament_size: int
 ): Couples {.exportpy.} =
+
+  assert num_tournaments > 0
+  assert tournament_size >= 2
+  assert fitnesses.len >= tournament_size
 
   var gene_ids = arange(fitnesses.len).to_seq()
 
@@ -1186,6 +1167,13 @@ proc tournament*(
       elif gene_fitness > fitness2:
         parent2 = gene_id
         fitness2 = gene_fitness
+
+    if parent1 < 0:
+      parent1 = tournament[0]
+      fitness1 = fitnesses[parent1]
+    if parent2 < 0:
+      parent2 = if tournament.len > 1: tournament[1] else: parent1
+      fitness2 = fitnesses[parent2]
 
     result.add(((parent1, fitness1), (parent2, fitness2)))
 
@@ -1388,7 +1376,10 @@ proc mutate(
     var active_nodes: seq[int] = @[]
 
     for i in 0 ..< meta_nodes_len:
-      if not nn.meta_nodes[i].disabled: active_nodes.add(i)
+      let node = nn.meta_nodes[i]
+      if node.disabled: continue
+      if top.nodes_index[node.node_id].`type` != NodeType.hidden: continue
+      active_nodes.add(i)
 
     if active_nodes.len > 0:
       let meta_node = nn.meta_nodes[sample(active_nodes)]
@@ -1568,11 +1559,11 @@ proc crossover(
 
   if satisfy_prob(hyper_params.prob_inherit_all_excess_genes):
 
-    # add a little noise for randomly tie-breaking parent one and two when scores are identical
+    let first_parent_is_fitter =
+      if first_parent_fitness == second_parent_fitness: coin_flip()
+      else: first_parent_fitness > second_parent_fitness
 
-    let noised_first_parent_fitness = first_parent_fitness + random_normal() * 1e-2
-
-    if noised_first_parent_fitness <= second_parent_fitness:
+    if not first_parent_is_fitter:
       disjoint_nodes_index = parent2_nodes_index
       disjoint_edges_index = parent2_edges_index
       disjoint_node_ids = (parent2_node_set - parent1_node_set).to_seq
@@ -1771,6 +1762,48 @@ proc clone*(nn: NeuralNetwork): NeuralNetwork =
     mutation_step_size: nn.mutation_step_size,
   )
 
+proc clone_nn*(top_id: int, nn_id: int): NeuralNetwork {.exportpy.} =
+  let top = topologies[top_id]
+  return top.population[nn_id].clone()
+
+proc set_nn*(top_id: int, nn_id: int, nn: NeuralNetwork) {.exportpy.} =
+  let top = topologies[top_id]
+  top.population[nn_id] = nn
+  top.population[nn_id].cached_exec_trace = none(ExecTrace)
+
+proc mutate_selected*(
+  all_top_ids: seq[int],
+  nn_ids: seq[int],
+  mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none
+) {.exportpy.} =
+  for top_id in all_top_ids:
+    let top = topologies[top_id]
+    for nn_id in nn_ids:
+      mutate(top, nn_id, mutation_hyper_params)
+    set_population_exec_trace(top_id)
+
+proc mutate_survivors*(
+  all_top_ids: seq[int],
+  mutation_hyper_params: Option[MutationHyperParams] = MutationHyperParams.none
+) {.exportpy.} =
+  for top_id in all_top_ids:
+    let top = topologies[top_id]
+    let hyper_params = mutation_hyper_params.get(top.mutation_hyper_params)
+    let sel_hparams = top.selection_hyper_params
+    let num_islands = top.num_islands
+    let pop_size = top.population.len
+    let island_pop_size = pop_size div num_islands
+    let num_selected_per_island = max(2, (sel_hparams.frac_natural_selected * island_pop_size.float).int)
+
+    for i in 0 ..< num_islands:
+      let offset = i * island_pop_size
+      let start_idx = offset + hyper_params.num_preserve_elites
+      let end_idx = offset + num_selected_per_island
+      for nn_id in start_idx ..< end_idx:
+        mutate(top, nn_id, mutation_hyper_params)
+
+    set_population_exec_trace(top_id)
+
 proc migrate_islands*(
   all_top_ids: seq[int],
   num_migrants: int
@@ -1799,6 +1832,7 @@ proc migrate_islands*(
               new_pop[curr_offset + island_pop_size - 1 - j] = top.population[prev_offset + j].clone()
 
           top.population = new_pop
+          set_population_exec_trace(top_id)
 
 proc reset_top_islands*(
   all_top_ids: seq[int],
@@ -1850,10 +1884,16 @@ proc reset_top_islands*(
             elif fit > f2:
               p2 = idx; f2 = fit
 
+          if p1 < 0: p1 = global_survivor_indices[0]
+          if p2 < 0: p2 = p1
+
           for top_id in all_top_ids:
             let top = topologies[top_id]
             let child = crossover(top, p1, p2, f1, f2)
             top.population[nn_id] = child
+
+      for top_id in all_top_ids:
+        set_population_exec_trace(top_id)
 
 # quick test
 

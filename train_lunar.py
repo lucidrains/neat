@@ -37,12 +37,6 @@ from neat.neat_nim import get_population_complexities
 
 # helpers
 
-def exists(v):
-    return v is not None
-
-def default(v, d):
-    return v if exists(v) else d
-
 def divisible_by(num, den):
     return (num % den) == 0
 
@@ -107,6 +101,10 @@ def train(
     # simplicity regularizer
     simplicity_weight: float = 1.0,
 
+    # brood competition parameters
+    brood_size: int = 1,
+    num_brood_rollouts: int = 1,
+
     # system
     recording_folder: str = './recordings',
     recorded_population_folder: str = './recorded-populations',
@@ -167,7 +165,7 @@ def train(
     wandb.init(project = 'lunar-neat', mode = 'disabled' if not wandb_online else 'online')
     wandb.run.name = run_name
 
-    env_name = "LunarLanderContinuous-v3" if continuous else "LunarLander-v3"
+    env_name = 'LunarLanderContinuous-v3' if continuous else 'LunarLander-v3'
 
     # environments
 
@@ -218,12 +216,12 @@ def train(
 
         rec_env.close()
 
-        video = wandb.Video(
-            f'{recording_folder}/lunar-video-episode-{num_recorded}.mp4',
-            format = 'gif'
-        )
-
-        wandb.log(dict(fittest_rollout = video))
+        if wandb_online:
+            video = wandb.Video(
+                f'{recording_folder}/lunar-video-episode-{num_recorded}.mp4',
+                format = 'gif'
+            )
+            wandb.log(dict(fittest_rollout = video))
 
     # set up population
 
@@ -240,20 +238,10 @@ def train(
 
     reward_buffer = np.zeros((end_max_episode_len + 1, pop_size), dtype = np.float32)
 
-    # interact with environment across generations
-
-    pbar = tqdm(range(num_generations))
-
-    for gen in pbar:
-        all_fitnesses = np.zeros(pop_size, dtype = np.float32)
-        seed = randrange(int(1e7))
-
-        current_max_episode_len = int(np.interp(gen, [0, curriculum_generations], [start_max_episode_len, end_max_episode_len]))
-
-        envs.reset(seed = seed)
-
-        for _ in range(num_rollouts_before_evo):
-            population.reset_recurrent_state()
+    def rollout_population(pop_model, num_rollouts, max_len):
+        total_fitnesses = np.zeros(pop_size, dtype = np.float32)
+        for _ in range(num_rollouts):
+            pop_model.reset_recurrent_state()
             state, _ = envs.reset()
 
             done = np.zeros(pop_size, dtype = bool)
@@ -261,7 +249,7 @@ def train(
             time = 0
 
             while True:
-                actions_to_env = population.forward(state, sample = not continuous)
+                actions_to_env = pop_model.forward(state, sample = not continuous)
                 actions_to_env = np.clip(actions_to_env, -1.0, 1.0) if continuous else actions_to_env
 
                 next_state, reward, truncated, terminated, *_ = envs.step(actions_to_env)
@@ -273,20 +261,33 @@ def train(
                 state = next_state
                 time += 1
 
-                if time >= current_max_episode_len:
+                if time >= max_len or done.all():
                     break
 
-                if done.all():
-                    break
+            total_fitnesses += reward_buffer[:time].sum(axis = 0)
 
-            all_fitnesses += reward_buffer[:time].sum(axis = 0)
+        return total_fitnesses / num_rollouts
 
-        fitnesses = all_fitnesses / num_rollouts_before_evo
+    # interact with environment across generations
+
+    pbar = tqdm(range(num_generations))
+
+    for gen in pbar:
+        seed = randrange(int(1e7))
+        current_max_episode_len = int(np.interp(gen, [0, curriculum_generations], [start_max_episode_len, end_max_episode_len]))
+
+        envs.reset(seed = seed)
+        fitnesses = rollout_population(population, num_rollouts_before_evo, current_max_episode_len)
 
         # insilico evolution
 
         _migrate_num = migrate_num if divisible_by(gen + 1, migrate_every) else 0
         _reset_islands_num = reset_islands_num if divisible_by(gen + 1, reset_islands_every) else 0
+
+        # evaluates the entire population in one go; fitnesses of the brood offsprings are looked up by their indices
+
+        def brood_eval(pop_model, target_nn_ids):
+            return rollout_population(pop_model, num_brood_rollouts, current_max_episode_len)
 
         population.genetic_algorithm_step(
             fitnesses,
@@ -296,7 +297,9 @@ def train(
             migrate_num = _migrate_num,
             reset_islands_num = _reset_islands_num,
             prob_weigh_complexity_as_fitness = prob_weigh_complexity_as_fitness,
-            simplicity_weight = simplicity_weight
+            simplicity_weight = simplicity_weight,
+            brood_size = brood_size,
+            eval_fn = brood_eval if brood_size > 1 else None
         )
 
         # logging
