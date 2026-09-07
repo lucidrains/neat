@@ -8,6 +8,8 @@ import torch.nn.functional as F
 from torch.optim import Adam
 from tqdm import tqdm
 
+from torch_einops_utils import slice_at_dim, tree_map_tensor
+
 from env_ssl_wrapper import StandardizeEnvWrapper, action_space_is_discrete
 
 import nimporter_plus
@@ -36,7 +38,16 @@ from neat.neat_nim import (
     reset_top_islands as reset_islands_nim,
     save_json_to_file,
     select_and_tournament,
-    set_nn
+    set_nn,
+    set_frozen,
+    set_frozen_subset,
+    freeze_population,
+    unfreeze_population,
+    freeze_subset,
+    unfreeze_subset,
+    get_frozen_stats,
+    get_population_connection_costs,
+    get_population_modularity_q
 )
 
 # functions
@@ -168,8 +179,14 @@ class Network:
 # genetic algorithm
 
 class GeneticAlgorithm:
-    def __init__(self):
+    def __init__(
+        self,
+        connection_cost_penalty: float = 0.0,
+        connection_cost_squared: bool = True
+    ):
         self.champion_index = None
+        self.connection_cost_penalty = connection_cost_penalty
+        self.connection_cost_squared = connection_cost_squared
 
     def reset_recurrent_state(self):
         pass
@@ -187,10 +204,53 @@ class GeneticAlgorithm:
     def __getitem__(self, index: int) -> Network:
         return Network(self, index)
 
+    def freeze(
+        self,
+        frozen: bool = True,
+        node_ids: list[int] | None = None,
+        edge_ids: list[int] | None = None,
+        except_outputs: int | list[int] | tuple[int, ...] | None = None,
+        except_heads: int | list[int] | tuple[int, ...] | None = None
+    ):
+        except_outputs = default(except_outputs, except_heads)
+        except_indices = [except_outputs] if isinstance(except_outputs, int) else list(default(except_outputs, []))
+
+        for top_id in self.all_top_ids:
+            if not exists(node_ids) and not exists(edge_ids):
+                set_frozen(top_id, frozen, except_indices)
+            else:
+                set_frozen_subset(top_id, default(node_ids, []), default(edge_ids, []), frozen)
+        return self
+
+    def unfreeze(
+        self,
+        node_ids: list[int] | None = None,
+        edge_ids: list[int] | None = None
+    ):
+        self.freeze(frozen = False, node_ids = node_ids, edge_ids = edge_ids)
+
+    @property
+    def frozen_stats(self):
+        return [get_frozen_stats(top_id) for top_id in self.all_top_ids]
+
     @property
     def champion(self) -> Network:
         assert exists(self.champion_index), 'must call genetic_algorithm_step with fitnesses before accessing champion'
         return self[self.champion_index]
+
+    def connection_costs(self, squared: bool = True):
+        return [get_population_connection_costs(top_id, squared = squared) for top_id in self.all_top_ids]
+
+    def modularities(self):
+        return [get_population_modularity_q(top_id) for top_id in self.all_top_ids]
+
+    def seed_from_champion(self):
+        assert exists(self.champion_index), 'must call genetic_algorithm_step with fitnesses before accessing champion'
+        for top_id in self.all_top_ids:
+            champ_nn = clone_nn(top_id, self.champion_index)
+            pop_size = len(self.output) if hasattr(self, 'output') else self.top.pop_size
+            for i in range(pop_size):
+                set_nn(top_id, i, clone_nn_obj(champ_nn))
 
     def genetic_algorithm_step(
         self,
@@ -203,6 +263,8 @@ class GeneticAlgorithm:
         reset_islands_tournament_size = 3,
         prob_weigh_complexity_as_fitness: float = 0.0,
         simplicity_weight: float = 1.0,
+        connection_cost_penalty: float | None = None,
+        connection_cost_squared: bool | None = None,
         eps: float = 1e-8,
         brood_size: int = 1,
         child_local_search_size: int = 1,
@@ -214,10 +276,17 @@ class GeneticAlgorithm:
         fitnesses = np.asarray(fitnesses)
         self.champion_index = int(np.argmax(fitnesses))
 
+        connection_cost_penalty = default(connection_cost_penalty, getattr(self, 'connection_cost_penalty', 0.0))
+        connection_cost_squared = default(connection_cost_squared, getattr(self, 'connection_cost_squared', True))
+
         if bernoulli(prob_weigh_complexity_as_fitness):
             complexities = np.array(get_population_complexities(self.all_top_ids[0]))
             simplicity_scores = 1.0 / (complexities + eps)
             fitnesses = fitnesses + simplicity_weight * simplicity_scores
+
+        if connection_cost_penalty > 0.0:
+            costs = np.array(get_population_connection_costs(self.all_top_ids[0], squared = connection_cost_squared))
+            fitnesses = fitnesses - connection_cost_penalty * costs
 
         # 2. select surviving elites and pairing parents, and determine which offsprings will replace which individuals
 
@@ -325,15 +394,21 @@ class NEAT(GeneticAlgorithm):
         crossover_hyper_params = None,
         selection_hyper_params = None,
         num_islands = 1,
-        num_recurrent = 0
+        num_recurrent = 0,
+        connection_cost_penalty: float = 0.0,
+        connection_cost_squared: bool = True
     ):
         assert len(dims) >= 2
-        super().__init__()
+        super().__init__(
+            connection_cost_penalty = connection_cost_penalty,
+            connection_cost_squared = connection_cost_squared
+        )
 
         dim_in = dims[0]
         dim_out = dims[-1]
         dim_hiddens = list(dims[1:-1])
 
+        self.dim_in = dim_in
         self.dim_out = dim_out
         self.num_recurrent = num_recurrent
         self.output = np.empty((pop_size, dim_out + num_recurrent), dtype = np.float32)
@@ -354,6 +429,18 @@ class NEAT(GeneticAlgorithm):
 
         self.all_top_ids = [self.top.id]
 
+    @property
+    def router(self):
+        if not hasattr(self, '_router'):
+            self._router = TaskRouter(self)
+        return self._router
+
+    def register_task(self, *args, **kwargs):
+        return self.router.register(*args, **kwargs)
+
+    def freeze_task(self, *args, **kwargs):
+        return self.router.freeze(*args, **kwargs)
+
     def reset_recurrent_state(self):
         self.recurrent_state = None
         self.single_recurrent_state = None
@@ -363,8 +450,17 @@ class NEAT(GeneticAlgorithm):
         index: int,
         state,
         sample = False,
-        temperature = 1.
+        temperature = 1.,
+        head: int | slice | tuple[int, int] | None = None,
+        task: str | tuple[object, object] | None = None
     ):
+        if exists(task):
+            return self.router.single_forward(index, state, task, sample = sample, temperature = temperature)
+
+        is_torch = torch.is_tensor(state)
+        state = tree_map_tensor(lambda t: t.detach().cpu().numpy(), state)
+        state = np.asarray(state, dtype = np.float32)
+
         has_recurrent = self.num_recurrent > 0
 
         if has_recurrent:
@@ -376,6 +472,13 @@ class NEAT(GeneticAlgorithm):
         if has_recurrent:
             logits, self.single_recurrent_state = logits[:-self.num_recurrent], logits[-self.num_recurrent:].copy()
 
+        if exists(head):
+            head = slice(*head) if isinstance(head, tuple) else (slice(head, head + 1) if isinstance(head, int) else head)
+            logits = slice_at_dim(logits, head, dim = -1)
+
+        if is_torch:
+            logits = torch.from_numpy(logits)
+
         if not sample:
             return logits
 
@@ -386,7 +489,16 @@ class NEAT(GeneticAlgorithm):
         state,
         sample = False,
         temperature = 1.,
+        head: int | slice | tuple[int, int] | None = None,
+        task: str | tuple[object, object] | None = None,
     ):
+        if exists(task):
+            return self.router.forward(state, task, sample = sample, temperature = temperature)
+
+        is_torch = torch.is_tensor(state)
+        state = tree_map_tensor(lambda t: t.detach().cpu().numpy(), state)
+        state = np.asarray(state, dtype = np.float32)
+
         has_recurrent = self.num_recurrent > 0
 
         if has_recurrent:
@@ -402,6 +514,13 @@ class NEAT(GeneticAlgorithm):
 
         if has_recurrent:
             out, self.recurrent_state = out[:, :-self.num_recurrent], out[:, -self.num_recurrent:].copy()
+
+        if exists(head):
+            head = slice(*head) if isinstance(head, tuple) else (slice(head, head + 1) if isinstance(head, int) else head)
+            out = slice_at_dim(out, head, dim = -1)
+
+        if is_torch:
+            out = torch.from_numpy(out)
 
         if not sample:
             return out
@@ -422,6 +541,81 @@ class NEAT(GeneticAlgorithm):
             target.tolist(),
             learning_rate
         )
+
+# task routing
+
+class TaskRouter:
+    """
+    Manages task routing and head selection across distinct tasks.
+    """
+    def __init__(self, neat: NEAT):
+        self.neat = neat
+        self.tasks = {}
+
+    def register(
+        self,
+        name: str,
+        output_head: int | slice | tuple[int, int] | None = None,
+        input_head: int | slice | tuple[int, int] | None = None,
+        head: int | slice | tuple[int, int] | None = None
+    ):
+        self.tasks[name] = {
+            'input_head': input_head,
+            'output_head': default(output_head, head)
+        }
+        return self
+
+    def embed_input(self, state, input_head):
+        if not exists(input_head):
+            return state
+
+        is_torch = torch.is_tensor(state)
+        state_np = tree_map_tensor(lambda t: t.detach().cpu().numpy(), state) if is_torch else state
+        state_np = np.asarray(state_np, dtype = np.float32)
+
+        slc = slice(input_head, input_head + 1) if isinstance(input_head, int) else (slice(*input_head) if isinstance(input_head, tuple) else input_head)
+        full_state = np.zeros((*state_np.shape[:-1], self.neat.dim_in), dtype = np.float32)
+        full_state[..., slc] = state_np
+
+        return torch.from_numpy(full_state) if is_torch else full_state
+
+    def forward(self, state, task: str | tuple[object, object], *args, **kwargs):
+        if isinstance(task, tuple) and len(task) == 2:
+            input_head, output_head = task
+        else:
+            assert task in self.tasks, f'Task {task} not found'
+            task_cfg = self.tasks[task]
+            input_head, output_head = task_cfg['input_head'], task_cfg['output_head']
+
+        state = self.embed_input(state, input_head)
+        return self.neat.forward(state, *args, head = output_head, **kwargs)
+
+    def single_forward(self, index: int, state, task: str | tuple[object, object], *args, **kwargs):
+        if isinstance(task, tuple) and len(task) == 2:
+            input_head, output_head = task
+        else:
+            assert task in self.tasks, f'Task {task} not found'
+            task_cfg = self.tasks[task]
+            input_head, output_head = task_cfg['input_head'], task_cfg['output_head']
+
+        state = self.embed_input(state, input_head)
+        return self.neat.single_forward(index, state, *args, head = output_head, **kwargs)
+
+    def freeze(self, task: str, except_other_tasks: list[str] | None = None):
+        assert task in self.tasks, f'Task {task} not found'
+        except_outputs = []
+        if exists(except_other_tasks):
+            for other in except_other_tasks:
+                oh = self.tasks[other]['output_head']
+                if exists(oh):
+                    if isinstance(oh, int):
+                        except_outputs.append(oh)
+                    elif isinstance(oh, (tuple, list)):
+                        except_outputs.extend(oh)
+                    elif isinstance(oh, slice):
+                        except_outputs.extend(range(oh.start or 0, oh.stop or self.neat.dim_out, oh.step or 1))
+        self.neat.freeze(except_outputs = except_outputs)
+        return self
 
 # behavior cloning
 

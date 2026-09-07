@@ -146,6 +146,7 @@ type
     can_change_activation: bool = true
     activation: Activation = tanh
     bias: float32 = 0.0
+    frozen: bool = false
 
   MetaEdge = ref object
     topology_id: int
@@ -155,6 +156,7 @@ type
     weight: float32
     local_from_node_id: int
     local_to_node_id: int
+    frozen: bool = false
 
   NeuralNetwork = ref object
     id: int
@@ -284,6 +286,111 @@ proc get_population_complexities*(
     for edge in nn.meta_edges:
       if not edge.disabled: complexity += 1
     result.add(complexity.float32)
+
+# Clune, Mouret, Lipson (2013) connection cost & modularity
+# Optimal node placement (Chklovskii 2004) minimizes sum of squared connection lengths
+
+proc layout_nodes(
+  top: Topology,
+  nn: NeuralNetwork,
+  num_iters: int = 20
+): tuple[x: seq[float32], y: seq[float32], neighbors: seq[seq[int]], num_edges: int] =
+  let num_nodes = nn.meta_nodes.len
+  if num_nodes == 0: return
+
+  let (num_in, num_out) = (top.num_inputs, top.num_outputs)
+  result.x = new_seq[float32](num_nodes)
+  result.y = new_seq[float32](num_nodes)
+
+  for i in 0 ..< num_in:
+    result.y[i] = 0.0
+    result.x[i] = if num_in > 1: -1.0 + 2.0 * (i.float32 / (num_in - 1).float32) else: 0.0
+
+  for o in 0 ..< num_out:
+    let idx = num_in + o
+    if idx < num_nodes:
+      result.y[idx] = 1.0
+      result.x[idx] = if num_out > 1: -1.0 + 2.0 * (o.float32 / (num_out - 1).float32) else: 0.0
+
+  for h in (num_in + num_out) ..< num_nodes:
+    result.x[h] = 0.0
+    result.y[h] = 0.5
+
+  result.neighbors = new_seq_with(num_nodes, new_seq[int]())
+  for edge in nn.meta_edges:
+    if not edge.disabled:
+      let (u, v) = (edge.local_from_node_id, edge.local_to_node_id)
+      if u in 0 ..< num_nodes and v in 0 ..< num_nodes:
+        result.neighbors[u].add(v)
+        result.neighbors[v].add(u)
+        result.num_edges += 1
+
+  # Laplace / barycenter relaxation
+  for _ in 0 ..< num_iters:
+    for h in (num_in + num_out) ..< num_nodes:
+      let neigh = result.neighbors[h]
+      if neigh.len > 0:
+        var sum_x, sum_y: float32 = 0.0
+        for n_idx in neigh:
+          sum_x += result.x[n_idx]
+          sum_y += result.y[n_idx]
+        result.x[h] = sum_x / neigh.len.float32
+        result.y[h] = sum_y / neigh.len.float32
+
+proc get_population_connection_costs*(
+  top_id: int,
+  squared: bool = true
+): seq[float32] {.exportpy.} =
+  let top = topologies[top_id]
+  result = new_seq[float32]()
+
+  for nn in top.population:
+    let (x, y, _, _) = top.layout_nodes(nn)
+    var cost: float32 = 0.0
+    for edge in nn.meta_edges:
+      if not edge.disabled:
+        let (u, v) = (edge.local_from_node_id, edge.local_to_node_id)
+        if u in 0 ..< x.len and v in 0 ..< x.len:
+          let (dx, dy) = (x[u] - x[v], y[u] - y[v])
+          let dist_sq = dx * dx + dy * dy
+          cost += (if squared: dist_sq else: sqrt(dist_sq))
+    result.add(cost)
+
+proc get_population_modularity_q*(
+  top_id: int
+): seq[float32] {.exportpy.} =
+  let top = topologies[top_id]
+  result = new_seq[float32]()
+
+  for nn in top.population:
+    let (x, _, neighbors, m) = top.layout_nodes(nn)
+    if m == 0:
+      result.add(0.0)
+      continue
+
+    let total_m = m.float32
+    var l0, l1: float32 = 0.0
+    var k0, k1: float32 = 0.0
+
+    for i in 0 ..< x.len:
+      let deg = neighbors[i].len.float32
+      if x[i] < 0.0:
+        k0 += deg
+      else:
+        k1 += deg
+
+    for edge in nn.meta_edges:
+      if not edge.disabled:
+        let (u, v) = (edge.local_from_node_id, edge.local_to_node_id)
+        if u in 0 ..< x.len and v in 0 ..< x.len:
+          if x[u] < 0.0 and x[v] < 0.0:
+            l0 += 1.0
+          elif x[u] >= 0.0 and x[v] >= 0.0:
+            l1 += 1.0
+
+    let norm = 2.0 * total_m
+    let q = (l0 / total_m - (k0 / norm) * (k0 / norm)) + (l1 / total_m - (k1 / norm) * (k1 / norm))
+    result.add(q)
 
 # saving population to pretty json for introspecting on evolved graphs
 
@@ -1313,7 +1420,7 @@ proc mutate_weights*(
 
   for i in 0 ..< meta_nodes_len:
     let node = nn.meta_nodes[i]
-    if node.disabled: continue
+    if node.disabled or node.frozen: continue
 
     if not hparams.use_fast_ga and satisfy_prob(hparams.change_node_bias_prob):
       perturb_value(node.bias, hparams.replace_node_bias_prob, bias_step.float, hparams.max_weight_magnitude)
@@ -1321,14 +1428,14 @@ proc mutate_weights*(
   if hparams.use_fast_ga:
     fast_ga_loop(meta_nodes_len, hparams.fast_ga_beta, i):
       let node = nn.meta_nodes[i]
-      if not node.disabled:
+      if not node.disabled and not node.frozen:
         perturb_value(node.bias, hparams.replace_node_bias_prob, bias_step.float, hparams.max_weight_magnitude)
 
   # mutating edge weights
 
   for i in 0 ..< meta_edges_len:
     let edge = nn.meta_edges[i]
-    if edge.disabled: continue
+    if edge.disabled or edge.frozen: continue
 
     if not hparams.use_fast_ga and satisfy_prob(hparams.change_edge_weight_prob):
       perturb_value(edge.weight, hparams.replace_edge_weight_prob, weight_step.float, hparams.max_weight_magnitude)
@@ -1336,7 +1443,7 @@ proc mutate_weights*(
   if hparams.use_fast_ga:
     fast_ga_loop(meta_edges_len, hparams.fast_ga_beta, i):
       let edge = nn.meta_edges[i]
-      if not edge.disabled:
+      if not edge.disabled and not edge.frozen:
         perturb_value(edge.weight, hparams.replace_edge_weight_prob, weight_step.float, hparams.max_weight_magnitude)
 
   nn.cached_exec_trace = none(ExecTrace)
@@ -1377,6 +1484,7 @@ proc mutate_structure*(
 
   for i in 0 ..< meta_nodes_len:
     let node = nn.meta_nodes[i]
+    if node.frozen: continue
 
     if node.can_disable and satisfy_prob(hparams.add_remove_node_prob):
       node.disabled = not node.disabled
@@ -1392,6 +1500,7 @@ proc mutate_structure*(
 
   for i in 0 ..< meta_edges_len:
     let edge = nn.meta_edges[i]
+    if edge.frozen: continue
 
     if edge.can_disable and satisfy_prob(hparams.toggle_meta_edge_prob):
       edge.disabled = not edge.disabled
@@ -1423,6 +1532,7 @@ proc mutate_structure*(
       let new_meta_node = MetaNode(
         topology_id: top.id, node_id: new_node_id, can_disable: true, disabled: false,
         activation: if coin_flip(): relu else: sigmoid, can_change_activation: coin_flip(),
+        frozen: false
       )
       let new_local_node_id = nn.meta_nodes.len
       node_index[new_node_id] = new_local_node_id
@@ -1433,8 +1543,12 @@ proc mutate_structure*(
         let (from_node_id, to_node_id) = node_from_to_id
         if not (node_index.has_key(from_node_id) and node_index.has_key(to_node_id) and edge_index.has_key(edge_id)): continue
         if nn.meta_edges[edge_index[edge_id]].disabled: continue
-        if to_node_id == meta_node_global_id: new_edge_ids.add(add_edge(top, from_node_id, new_node_id))
-        elif from_node_id == meta_node_global_id: new_edge_ids.add(add_edge(top, new_node_id, to_node_id))
+        if to_node_id == meta_node_global_id:
+          new_edge_ids.add(add_edge(top, from_node_id, new_node_id))
+        elif from_node_id == meta_node_global_id:
+          let to_local = node_index[to_node_id]
+          if not nn.meta_nodes[to_local].frozen:
+            new_edge_ids.add(add_edge(top, new_node_id, to_node_id))
 
       for new_edge_id in new_edge_ids:
         let edge = top.edges[new_edge_id]
@@ -1444,7 +1558,7 @@ proc mutate_structure*(
   template do_grow_edge() =
     var active_edges: seq[int] = @[]
     for i in 0 ..< meta_edges_len:
-      if not nn.meta_edges[i].disabled: active_edges.add(i)
+      if not nn.meta_edges[i].disabled and not nn.meta_edges[i].frozen: active_edges.add(i)
     if active_edges.len > 0:
       let meta_edge = nn.meta_edges[sample(active_edges)]
       meta_edge.disabled = true
@@ -1464,6 +1578,7 @@ proc mutate_structure*(
       nn.meta_nodes.add(MetaNode(
         topology_id: top.id, node_id: node_id, can_disable: true,
         activation: if coin_flip(): relu else: sigmoid, can_change_activation: coin_flip(),
+        frozen: false
       ))
       node_index[node_id] = new_local_node_id
 
@@ -1472,19 +1587,24 @@ proc mutate_structure*(
       mutated = true
 
   template do_add_novel_edge() =
-    var active_nodes: seq[int] = @[]
+    var active_from_nodes: seq[int] = @[]
+    var active_to_nodes: seq[int] = @[]
     for i in 0 ..< nn.meta_nodes.len:
-      if not nn.meta_nodes[i].disabled: active_nodes.add(i)
+      if not nn.meta_nodes[i].disabled:
+        if top.nodes_index[nn.meta_nodes[i].node_id].`type` != NodeType.output or nn.meta_nodes[i].frozen:
+          active_from_nodes.add(i)
+        if top.nodes_index[nn.meta_nodes[i].node_id].`type` != NodeType.input and not nn.meta_nodes[i].frozen:
+          active_to_nodes.add(i)
 
-    if active_nodes.len > 1:
-      let from_local = sample(active_nodes)
-      var to_local = sample(active_nodes)
+    if active_from_nodes.len > 0 and active_to_nodes.len > 0:
+      let from_local = sample(active_from_nodes)
+      var to_local = sample(active_to_nodes)
       var attempts = 0
       while from_local == to_local and attempts < 10:
-        to_local = sample(active_nodes)
+        to_local = sample(active_to_nodes)
         attempts += 1
 
-      if from_local != to_local and top.nodes_index[nn.meta_nodes[from_local].node_id].`type` != NodeType.output and top.nodes_index[nn.meta_nodes[to_local].node_id].`type` != NodeType.input:
+      if from_local != to_local:
         let from_global = nn.meta_nodes[from_local].node_id
         let to_global = nn.meta_nodes[to_local].node_id
         let rct = (from_global, to_global)
@@ -1493,7 +1613,8 @@ proc mutate_structure*(
         if not edge_index.has_key(edge_id):
           add_meta_edge(edge_id, from_local, to_local, random_normal())
         else:
-          nn.meta_edges[edge_index[edge_id]].disabled = false
+          if not nn.meta_edges[edge_index[edge_id]].frozen:
+            nn.meta_edges[edge_index[edge_id]].disabled = false
         mutated = true
 
   # structural mutations - fired ONCE per individual, not per node/edge
@@ -1670,12 +1791,12 @@ proc crossover(
     let new_node = MetaNode()
     new_node[] = rand_node[]
 
-    if (parent1_node.disabled or parent2_node.disabled):
+    if not new_node.frozen and (parent1_node.disabled or parent2_node.disabled):
       new_node.disabled = satisfy_prob(hyper_params.prob_child_disabled_given_parent_cond)
 
     # some of the time, do not inherit disabled genes
 
-    if satisfy_prob(hyper_params.prob_remove_disabled_node) and new_node.disabled:
+    if not new_node.frozen and satisfy_prob(hyper_params.prob_remove_disabled_node) and new_node.disabled:
       continue
 
     child_node_index[new_node.node_id] = child_nodes.len
@@ -1708,7 +1829,7 @@ proc crossover(
     let new_edge = MetaEdge()
     new_edge[] = rand_edge[]
 
-    if (parent1_edge.disabled or parent2_edge.disabled):
+    if not new_edge.frozen and (parent1_edge.disabled or parent2_edge.disabled):
       new_edge.disabled = satisfy_prob(hyper_params.prob_child_disabled_given_parent_cond)
 
     let edge = top.edges[new_edge.edge_id]
@@ -1914,6 +2035,75 @@ proc mutate_survivors*(
         mutate(top, nn_id, mutation_hyper_params)
 
     set_population_exec_trace(top_id)
+
+proc set_frozen*(
+  top_id: int,
+  frozen: bool = true,
+  except_output_indices: seq[int] = @[]
+) {.exportpy.} =
+  let top = topologies[top_id]
+  var exempt_node_ids = init_hash_set[int]()
+  for out_idx in except_output_indices:
+    exempt_node_ids.incl(top.num_inputs + out_idx)
+
+  for nn in top.population:
+    for node in nn.meta_nodes:
+      if node.node_id notin exempt_node_ids:
+        node.frozen = frozen
+        node.can_disable = not frozen
+        node.can_change_activation = not frozen
+    for edge in nn.meta_edges:
+      let top_edge = top.edges[edge.edge_id]
+      if top_edge.to_node_id notin exempt_node_ids:
+        edge.frozen = frozen
+        edge.can_disable = not frozen
+
+proc set_frozen_subset*(
+  top_id: int,
+  node_ids: seq[int],
+  edge_ids: seq[int],
+  frozen: bool = true
+) {.exportpy.} =
+  let top = topologies[top_id]
+  let node_set = node_ids.to_hash_set
+  let edge_set = edge_ids.to_hash_set
+  for nn in top.population:
+    for node in nn.meta_nodes:
+      if node.node_id in node_set:
+        node.frozen = frozen
+        node.can_disable = not frozen
+        node.can_change_activation = not frozen
+    for edge in nn.meta_edges:
+      if edge.edge_id in edge_set:
+        edge.frozen = frozen
+        edge.can_disable = not frozen
+
+proc freeze_population*(top_id: int, except_output_indices: seq[int] = @[]) {.exportpy.} =
+  set_frozen(top_id, true, except_output_indices)
+
+proc unfreeze_population*(top_id: int) {.exportpy.} =
+  set_frozen(top_id, false)
+
+proc freeze_subset*(top_id: int, node_ids: seq[int], edge_ids: seq[int]) {.exportpy.} =
+  set_frozen_subset(top_id, node_ids, edge_ids, true)
+
+proc unfreeze_subset*(top_id: int, node_ids: seq[int], edge_ids: seq[int]) {.exportpy.} =
+  set_frozen_subset(top_id, node_ids, edge_ids, false)
+
+proc get_frozen_stats*(
+  top_id: int
+): tuple[frozen_nodes: int, total_nodes: int, frozen_edges: int, total_edges: int] {.exportpy.} =
+  let top = topologies[top_id]
+  if top.population.len == 0:
+    return (0, 0, 0, 0)
+  let nn = top.population[0]
+  var fn = 0
+  for n in nn.meta_nodes:
+    if n.frozen: fn += 1
+  var fe = 0
+  for e in nn.meta_edges:
+    if e.frozen: fe += 1
+  return (fn, nn.meta_nodes.len, fe, nn.meta_edges.len)
 
 proc migrate_islands*(
   all_top_ids: seq[int],

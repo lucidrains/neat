@@ -182,3 +182,17 @@ $ uv run train_bc_cartpole.py
     doi       = {10.1109/ICEC.1994.350030}
 }
 ```
+
+```bibtex
+@article{clune2013evolutionary,
+    title     = {The evolutionary origins of modularity},
+    author    = {Clune, Jeff and Mouret, Jean-Baptiste and Lipson, Hod},
+    journal   = {Proceedings of the Royal Society B: Biological Sciences},
+    volume    = {280},
+    number    = {1755},
+    pages     = {20122863},
+    year      = {2013},
+    publisher = {The Royal Society},
+    doi       = {10.1098/rspb.2012.2863}
+}
+```
