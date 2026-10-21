@@ -234,6 +234,7 @@ def train(
     save_population_every: int = 100,
 
     # environment parameters
+    grid_size: int = 4,
     start_max_episode_len: int = 40,
     end_max_episode_len: int = 40,
     curriculum_generations: int = 200,
