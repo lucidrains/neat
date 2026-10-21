@@ -47,10 +47,14 @@ from neat.neat_nim import (
     unfreeze_subset,
     get_frozen_stats,
     get_population_connection_costs,
-    get_population_modularity_q
+    get_population_modularity_q,
+    set_seed as set_seed_nim
 )
 
 # functions
+
+def set_seed(seed: int):
+    set_seed_nim(seed)
 
 def exists(v):
     return v is not None
@@ -93,9 +97,10 @@ def get_prob_structural(mutation_hyper_params):
     p_grow_n = mutation_hyper_params.get("grow_node_prob", 1e-5)
     p_toggle = mutation_hyper_params.get("toggle_meta_edge_prob", 0.05)
     p_act = mutation_hyper_params.get("change_activation_prob", 0.001)
+    p_agg = mutation_hyper_params.get("change_aggregation_prob", 0.001)
     p_node = mutation_hyper_params.get("add_remove_node_prob", 1e-5)
 
-    no_struct = (1.0 - p_novel) * (1.0 - p_grow_e) * (1.0 - p_grow_n) * (1.0 - p_toggle) * (1.0 - p_act) * (1.0 - p_node)
+    no_struct = (1.0 - p_novel) * (1.0 - p_grow_e) * (1.0 - p_grow_n) * (1.0 - p_toggle) * (1.0 - p_act) * (1.0 - p_agg) * (1.0 - p_node)
     p_struct = m_prob * (1.0 - no_struct)
     return float(np.clip(p_struct, 0.0, 1.0))
 
@@ -120,6 +125,7 @@ class Topology:
             num_hiddens = (num_hiddens,)
 
         self.pop_size = pop_size
+        self.num_islands = num_islands
         self.shape = shape
 
         if exists(shape):
@@ -274,7 +280,7 @@ class GeneticAlgorithm:
         # 1. select for fitness, and occasionally simplicity as well
 
         fitnesses = np.asarray(fitnesses)
-        self.champion_index = int(np.argmax(fitnesses))
+        raw_champ_idx = int(np.argmax(fitnesses))
 
         connection_cost_penalty = default(connection_cost_penalty, getattr(self, 'connection_cost_penalty', 0.0))
         connection_cost_squared = default(connection_cost_squared, getattr(self, 'connection_cost_squared', True))
@@ -290,7 +296,18 @@ class GeneticAlgorithm:
 
         # 2. select surviving elites and pairing parents, and determine which offsprings will replace which individuals
 
-        _, _, couples, target_nn_ids = select_and_tournament(self.all_top_ids, fitnesses.tolist(), selection_hyper_params)
+        selected_indices, _, couples, target_nn_ids = select_and_tournament(self.all_top_ids, fitnesses.tolist(), selection_hyper_params)
+
+        # elites are copied to island slots, so remap the raw argmax to its post-selection slot
+
+        if raw_champ_idx in selected_indices:
+            num_islands = getattr(getattr(self, 'top', None), 'num_islands', 1)
+            island_pop_size = len(fitnesses) // num_islands
+            num_sel_per_island = len(selected_indices) // num_islands
+            island_id, rank = divmod(selected_indices.index(raw_champ_idx), num_sel_per_island)
+            self.champion_index = island_id * island_pop_size + rank
+        else:
+            self.champion_index = 0
 
         # 3. produce the offsprings
         # supports both Child Local Search (weight optimization on a fixed topology)
@@ -396,7 +413,9 @@ class NEAT(GeneticAlgorithm):
         num_islands = 1,
         num_recurrent = 0,
         connection_cost_penalty: float = 0.0,
-        connection_cost_squared: bool = True
+        connection_cost_squared: bool = True,
+        time_mode: str | None = None,
+        time_freq: float = 1.0
     ):
         assert len(dims) >= 2
         super().__init__(
@@ -408,15 +427,20 @@ class NEAT(GeneticAlgorithm):
         dim_out = dims[-1]
         dim_hiddens = list(dims[1:-1])
 
+        assert time_mode in (None, 'raw', 'sin_cos')
         self.dim_in = dim_in
         self.dim_out = dim_out
         self.num_recurrent = num_recurrent
+        self.time_mode = time_mode
+        self.time_freq = time_freq
+        self.time_dim = {'raw': 1, 'sin_cos': 2, None: 0}[time_mode]
+        self.time = 0.0
         self.output = np.empty((pop_size, dim_out + num_recurrent), dtype = np.float32)
         self.recurrent_state = None
         self.single_recurrent_state = None
 
         self.top = Topology(
-            dim_in,
+            dim_in + self.time_dim,
             dim_out,
             num_hiddens = dim_hiddens,
             pop_size = pop_size,
@@ -444,6 +468,14 @@ class NEAT(GeneticAlgorithm):
     def reset_recurrent_state(self):
         self.recurrent_state = None
         self.single_recurrent_state = None
+        self.time = 0.0
+
+    def _time_features(self, t):
+        if self.time_mode is None:
+            return np.zeros(0, dtype = np.float32)
+        if self.time_mode == 'raw':
+            return np.array([t], dtype = np.float32)
+        return np.array([np.sin(2.0 * np.pi * self.time_freq * t), np.cos(2.0 * np.pi * self.time_freq * t)], dtype = np.float32)
 
     def single_forward(
         self,
@@ -452,7 +484,9 @@ class NEAT(GeneticAlgorithm):
         sample = False,
         temperature = 1.,
         head: int | slice | tuple[int, int] | None = None,
-        task: str | tuple[object, object] | None = None
+        task: str | tuple[object, object] | None = None,
+        dt: float = 0.02,
+        time: float | None = None
     ):
         if exists(task):
             return self.router.single_forward(index, state, task, sample = sample, temperature = temperature)
@@ -462,10 +496,16 @@ class NEAT(GeneticAlgorithm):
         state = np.asarray(state, dtype = np.float32)
 
         has_recurrent = self.num_recurrent > 0
+        t = default(time, self.time)
+
+        if self.time_dim > 0:
+            state = np.concatenate((state, self._time_features(t)))
 
         if has_recurrent:
             self.single_recurrent_state = default(self.single_recurrent_state, np.zeros(self.num_recurrent, dtype = np.float32))
             state = np.concatenate((state, self.single_recurrent_state))
+
+        self.time = t + dt
 
         logits = np.array(evaluate_nn_single(self.top.id, index, state.tolist(), use_exec_cache = True), dtype = np.float32)
 
@@ -491,6 +531,8 @@ class NEAT(GeneticAlgorithm):
         temperature = 1.,
         head: int | slice | tuple[int, int] | None = None,
         task: str | tuple[object, object] | None = None,
+        dt: float = 0.02,
+        time: float | None = None
     ):
         if exists(task):
             return self.router.forward(state, task, sample = sample, temperature = temperature)
@@ -500,11 +542,18 @@ class NEAT(GeneticAlgorithm):
         state = np.asarray(state, dtype = np.float32)
 
         has_recurrent = self.num_recurrent > 0
+        t = default(time, self.time)
+
+        if self.time_dim > 0:
+            time_features = np.broadcast_to(self._time_features(t), (*state.shape[:-1], self.time_dim))
+            state = np.concatenate((state, time_features), axis = -1)
 
         if has_recurrent:
             batch, *_ = state.shape
             self.recurrent_state = default(self.recurrent_state, np.zeros((batch, self.num_recurrent), dtype = np.float32))
             state = np.concatenate((state, self.recurrent_state), axis = -1)
+
+        self.time = t + dt
 
         input = np.ascontiguousarray(state, dtype = np.float32)
 

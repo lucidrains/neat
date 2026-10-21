@@ -1,6 +1,8 @@
 import std/[
   random,
-  assertions
+  assertions,
+  tables,
+  options
 ]
 
 import ../neat/neat_nim
@@ -69,10 +71,80 @@ proc test_topology_construction() =
   assert info_multi.total_innovated_nodes == 9
   assert info_multi.total_innovated_edges == 20
 
+proc test_activation_and_aggregation() =
+  let top_id = add_topology(2, 1, @[1])
+  init_population(top_id, 2)
+  let top = topologies[top_id]
+  let nn = top.population[0]
+
+  # input and output nodes cannot change activation or aggregation
+
+  for i in 0 .. 2:
+    assert not nn.meta_nodes[i].can_change_activation
+    assert not nn.meta_nodes[i].can_change_aggregation
+
+  let hidden_node = nn.meta_nodes[3]
+  assert hidden_node.can_change_activation
+  assert hidden_node.can_change_aggregation
+  assert hidden_node.aggregation == Aggregation.sum
+
+  # inputs [2, 4] -> hidden weighted sum 4 + 12, bias 0.5
+
+  nn.meta_edges[0].disabled = true
+  nn.meta_edges[1].disabled = true
+  nn.meta_edges[2].disabled = false
+  nn.meta_edges[2].weight = 2.0'f32
+  nn.meta_edges[3].disabled = false
+  nn.meta_edges[3].weight = 3.0'f32
+  nn.meta_edges[4].disabled = false
+  nn.meta_edges[4].weight = 1.0'f32
+
+  hidden_node.bias = 0.5'f32
+  hidden_node.activation = identity
+  hidden_node.disabled = false
+  nn.meta_nodes[2].bias = 0.0'f32
+  nn.meta_nodes[2].activation = identity
+  nn.meta_nodes[2].disabled = false
+
+  let test_inputs = @[2.0'f32, 4.0'f32]
+  let cases = [
+    (Aggregation.sum, 16.5'f32),
+    (Aggregation.product, 48.5'f32),
+    (Aggregation.max, 12.5'f32),
+    (Aggregation.min, 4.5'f32),
+    (Aggregation.mean, 8.5'f32)
+  ]
+
+  for (aggregation, expected) in cases:
+    hidden_node.aggregation = aggregation
+    nn.cached_exec_trace = none(ExecTrace)
+
+    let out_uncached = evaluate_nn_single(top_id, 0, test_inputs, use_exec_cache = false)
+    let out_cached = evaluate_nn_single(top_id, 0, test_inputs, use_exec_cache = true)
+
+    assert abs(out_uncached[0] - expected) < 1e-5'f32
+    assert abs(out_cached[0] - expected) < 1e-5'f32
+
+  var custom_hparams = MutationHyperParams(
+    mutate_prob: 1.0,
+    change_activation_prob: 1.0,
+    change_aggregation_prob: 1.0,
+    add_novel_edge_prob: 0.0,
+    grow_edge_prob: 0.0,
+    grow_node_prob: 0.0,
+    toggle_meta_edge_prob: 0.0,
+    add_remove_node_prob: 0.0
+  )
+  discard mutate_structure(top, 1, some(custom_hparams), force = true)
+  let mutated_hidden = top.population[1].meta_nodes[3]
+  assert mutated_hidden.can_change_activation
+  assert mutated_hidden.can_change_aggregation
+
 when is_main_module:
   randomize(42)
   test_tournament()
   test_fuss_couples()
   test_sample_waiting_time()
   test_topology_construction()
+  test_activation_and_aggregation()
   echo "ALL NIM UNIT TESTS PASSED!"

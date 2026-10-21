@@ -1,6 +1,6 @@
 [project]
 name = "x-neat"
-version = "0.0.9"
+version = "0.0.12"
 description = "NEAT"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -62,6 +62,9 @@ neat = ["*.nim"]
 [tool.pytest.ini_options]
 pythonpath = [
     "."
+]
+testpaths = [
+    "tests"
 ]
 
 [build-system]

@@ -33,6 +33,9 @@ type
 
 randomize()
 
+proc set_seed*(seed: int64) {.exportpy.} =
+  randomize(seed)
+
 # from @Vindaar - https://github.com/yglukhov/nimpy/issues/114#issuecomment-531504502
 
 type
@@ -94,15 +97,22 @@ proc sample_waiting_time*(prob: float): int =
 
 # activation functions
 
-proc sigmoid(x: float32): float32 = 1.0 / (1.0 + exp(-x))
-proc relu(x: float32): float32 = max(x, 0.0)
-proc gauss(x: float32): float32 = exp(-pow(x, 2))
-proc elu(x: float32): float32 = (if x >= 0.0: x else: exp(x) - 1.0)
-proc clamp_one(x: float32): float32 = max(min(x, 1.0), -1.0)
+proc sigmoid(x: float32): float32 =
+  let xc = max(min(x, 60.0'f32), -60.0'f32)
+  1.0'f32 / (1.0'f32 + exp(-xc))
+
+proc relu(x: float32): float32 = max(x, 0.0'f32)
+proc gauss(x: float32): float32 = exp(-min(x * x, 60.0'f32))
+proc elu(x: float32): float32 = (if x >= 0.0'f32: x else: exp(max(x, -60.0'f32)) - 1.0'f32)
+proc clamp_one(x: float32): float32 = max(min(x, 1.0'f32), -1.0'f32)
 
 type
-  Activation = enum
-    identity, sigmoid, tanh, relu, clamp, elu, gauss, sin, abs
+  Activation* = enum
+    identity, sigmoid, tanh, relu, clamp, elu, gauss, sin, abs, cos
+
+  # Sigma-Pi / product units & generalized propagation rules - Rumelhart, Hinton, McClelland (1986)
+  Aggregation* = enum
+    sum, product, max, min, mean
 
   NumNodesInfo = tuple
     num_inputs: int
@@ -118,11 +128,12 @@ type
     to_node_id: int
     activation_id: int
     bias: float32
+    aggregation_id: int
     trace: seq[WeightUpdate]
 
-  ExecTrace = ref object
-    node_info: NumNodesInfo
-    node_updates: seq[NodeUpdate]
+  ExecTrace* = ref object
+    node_info*: NumNodesInfo
+    node_updates*: seq[NodeUpdate]
 
   NodeType = enum
     input, output, hidden
@@ -138,36 +149,38 @@ type
     from_node_id: int
     to_node_id: int
 
-  MetaNode = ref object
-    topology_id: int
-    node_id: int
-    disabled: bool
-    can_disable: bool
-    can_change_activation: bool = true
-    activation: Activation = tanh
-    bias: float32 = 0.0
-    frozen: bool = false
+  MetaNode* = ref object
+    topology_id*: int
+    node_id*: int
+    disabled*: bool
+    can_disable*: bool
+    can_change_activation*: bool = true
+    activation*: Activation = tanh
+    can_change_aggregation*: bool = true
+    aggregation*: Aggregation = sum
+    bias*: float32 = 0.0
+    frozen*: bool = false
 
-  MetaEdge = ref object
-    topology_id: int
-    edge_id: int
-    can_disable: bool = true
-    disabled: bool
-    weight: float32
-    local_from_node_id: int
-    local_to_node_id: int
-    frozen: bool = false
+  MetaEdge* = ref object
+    topology_id*: int
+    edge_id*: int
+    can_disable*: bool = true
+    disabled*: bool
+    weight*: float32
+    local_from_node_id*: int
+    local_to_node_id*: int
+    frozen*: bool = false
 
-  NeuralNetwork = ref object
-    id: int
-    topology_id: int
-    num_inputs: int
-    num_outputs: int
-    num_hiddens: seq[int] = @[]
-    meta_nodes: seq[MetaNode] = @[]
-    meta_edges: seq[MetaEdge] = @[]
-    cached_exec_trace: Option[ExecTrace]
-    mutation_step_size: float32 = 0.1
+  NeuralNetwork* = ref object
+    id*: int
+    topology_id*: int
+    num_inputs*: int
+    num_outputs*: int
+    num_hiddens*: seq[int] = @[]
+    meta_nodes*: seq[MetaNode] = @[]
+    meta_edges*: seq[MetaEdge] = @[]
+    cached_exec_trace*: Option[ExecTrace]
+    mutation_step_size*: float32 = 0.1
 
   # hyperparams
 
@@ -182,54 +195,55 @@ type
     prob_remove_disabled_node: float = 0.01
     prob_inherit_all_excess_genes: float = 1.0
 
-  MutationHyperParams = object
-    use_self_adaptive_mutation: bool = false
-    min_mutation_step_size: float = 0.001
-    max_mutation_step_size: float = 0.1
-    mutate_prob: float = 0.95
-    use_fast_ga: bool = false
-    fast_ga_beta: float = 1.5
-    add_novel_edge_prob: float = 5e-3
-    toggle_meta_edge_prob: float = 0.05
-    add_remove_node_prob: float = 1e-5
-    change_activation_prob: float = 0.001
-    change_edge_weight_prob: float = 0.5
-    replace_edge_weight_prob: float = 0.1
-    change_node_bias_prob: float = 0.1
-    replace_node_bias_prob: float = 0.1
-    grow_edge_prob: float = 5e-4
-    grow_node_prob: float = 1e-5
-    perturb_weight_strength: float = 0.1
-    perturb_bias_strength: float = 0.1
-    num_preserve_elites: int = 0
-    max_weight_magnitude: float = 30.0
+  MutationHyperParams* = object
+    use_self_adaptive_mutation*: bool = false
+    min_mutation_step_size*: float = 0.001
+    max_mutation_step_size*: float = 0.1
+    mutate_prob*: float = 0.95
+    use_fast_ga*: bool = false
+    fast_ga_beta*: float = 1.5
+    add_novel_edge_prob*: float = 5e-3
+    toggle_meta_edge_prob*: float = 0.05
+    add_remove_node_prob*: float = 1e-5
+    change_activation_prob*: float = 0.001
+    change_aggregation_prob*: float = 0.001
+    change_edge_weight_prob*: float = 0.5
+    replace_edge_weight_prob*: float = 0.1
+    change_node_bias_prob*: float = 0.1
+    replace_node_bias_prob*: float = 0.1
+    grow_edge_prob*: float = 5e-4
+    grow_node_prob*: float = 1e-5
+    perturb_weight_strength*: float = 0.1
+    perturb_bias_strength*: float = 0.1
+    num_preserve_elites*: int = 0
+    max_weight_magnitude*: float = 30.0
 
   # 'topology' - rename to population at some point
 
-  Topology = ref object
-    id: int
+  Topology* = ref object
+    id*: int
 
-    nodes: seq[Node] = @[] # nodes will be always arrange [input] [output] [hiddens]
-    edges: seq[Edge] = @[]
+    nodes*: seq[Node] = @[] # nodes will be always arrange [input] [output] [hiddens]
+    edges*: seq[Edge] = @[]
 
-    nodes_index: Table[int, Node]
-    edges_index: Table[int, Edge]
-    conn_index: Table[(int, int), int]
-    edge_splits: Table[int, (int, int, int)]
+    nodes_index*: Table[int, Node]
+    edges_index*: Table[int, Edge]
+    conn_index*: Table[(int, int), int]
+    edge_splits*: Table[int, (int, int, int)]
 
-    num_inputs: int
-    num_outputs: int
-    num_hiddens: seq[int] = @[]
-    num_initial_edges: int
+    num_inputs*: int
+    num_outputs*: int
+    num_hiddens*: seq[int] = @[]
+    num_initial_edges*: int
 
-    nn_id: int = 0
-    node_innovation_id: Atomic[int]
-    edge_innovation_id: Atomic[int]
+    nn_id*: int = 0
+    node_innovation_id*: Atomic[int]
+    edge_innovation_id*: Atomic[int]
 
-    num_islands: int = 1
-    pop_size: int = 0
-    curr_pop_size: int = 0
-    population: seq[NeuralNetwork] = @[]
+    num_islands*: int = 1
+    pop_size*: int = 0
+    curr_pop_size*: int = 0
+    population*: seq[NeuralNetwork] = @[]
 
     # default hyperparams
 
@@ -257,7 +271,7 @@ type
 
 # globals
 
-var topologies = init_table[int, Topology]()
+var topologies* = init_table[int, Topology]()
 var topology_id: Atomic[int]
 
 # helper accessors
@@ -429,8 +443,10 @@ proc activate(act: Activation, input: float32): float32 {.gcsafe.}
 proc activate(node: MetaNode, input: Tensor[float32]): Tensor[float32] {.gcsafe.}
 
 proc set_population_exec_trace*(top_id: int)
+proc clone*(nn: NeuralNetwork): NeuralNetwork
 
 proc rand_activation(): Activation
+proc rand_aggregation*(): Aggregation
 
 proc add_topology*(
   num_inputs: int,
@@ -599,7 +615,9 @@ proc init_nn(
       disabled: false,
       can_disable: false,
       can_change_activation: false,
-      activation: identity
+      activation: identity,
+      can_change_aggregation: false,
+      aggregation: sum
     )
 
     node_index[node.id] = nn.meta_nodes.len
@@ -615,7 +633,9 @@ proc init_nn(
       disabled: false,
       can_disable: false,
       can_change_activation: false,
-      activation: identity
+      activation: identity,
+      can_change_aggregation: false,
+      aggregation: sum
     )
 
     node_index[node.id] = nn.meta_nodes.len
@@ -631,8 +651,10 @@ proc init_nn(
       disabled: satisfy_prob(sparsity),
       can_disable: true,
       bias: random_normal(),
-      can_change_activation: false,
-      activation: if coin_flip(): relu else: sigmoid
+      can_change_activation: true,
+      activation: if coin_flip(): relu else: sigmoid,
+      can_change_aggregation: true,
+      aggregation: sum
     )
 
     node_index[node.id] = nn.meta_nodes.len
@@ -671,7 +693,7 @@ proc init_nn(
 
   top.population[nn_id] = nn
 
-proc init_population(
+proc init_population*(
   top_id: int,
   pop_size: int,
 ) {.exportpy.} =
@@ -690,6 +712,23 @@ proc init_population(
   assert top.population.len == top.pop_size
 
   set_population_exec_trace(top_id)
+
+# tensor aggregation helpers
+
+proc tensor_max(a, b: Tensor[float32]): Tensor[float32] {.inline.} =
+  result = newTensor[float32](a.shape)
+  for i in 0 ..< a.size:
+    result[i] = max(a[i], b[i])
+
+proc tensor_min(a, b: Tensor[float32]): Tensor[float32] {.inline.} =
+  result = newTensor[float32](a.shape)
+  for i in 0 ..< a.size:
+    result[i] = min(a[i], b[i])
+
+proc tensor_mul(a, b: Tensor[float32]): Tensor[float32] {.inline.} =
+  result = newTensor[float32](a.shape)
+  for i in 0 ..< a.size:
+    result[i] = a[i] * b[i]
 
 # forward
 
@@ -757,12 +796,18 @@ proc evaluate_nn(
 
     let meta_node = nn.meta_nodes[index]
 
+    if meta_node.disabled:
+      let zero_val = zeros[float32](one_input_shape)
+      finished[index] = 1
+      values[index] = zero_val
+      return zero_val
+
     # start with bias
 
     var next_visited = visited
     next_visited[index] = 1
 
-    var node_value = zeros[float32](one_input_shape) +. meta_node.bias
+    var node_value: Tensor[float32]
 
     # find all edges
 
@@ -791,11 +836,42 @@ proc evaluate_nn(
 
       input_node_index_and_weight.add((meta_edge.weight, local_from_node_id))
 
-    # get weighted sum of inputs to the node
-
-    for entry in input_node_index_and_weight:
-      let (weight, local_from_node_id) = entry
-      node_value += weight * compute_node_value(local_from_node_id, next_visited)
+    # aggregate inputs to the node
+    if input_node_index_and_weight.len == 0:
+      node_value = zeros[float32](one_input_shape) +. meta_node.bias
+    else:
+      case meta_node.aggregation
+      of sum:
+        node_value = zeros[float32](one_input_shape) +. meta_node.bias
+        for entry in input_node_index_and_weight:
+          let (weight, local_from_node_id) = entry
+          node_value += weight * compute_node_value(local_from_node_id, next_visited)
+      of product:
+        var prod_tensor = ones[float32](one_input_shape)
+        for entry in input_node_index_and_weight:
+          let (weight, local_from_node_id) = entry
+          prod_tensor = tensor_mul(prod_tensor, weight * compute_node_value(local_from_node_id, next_visited))
+        node_value = prod_tensor +. meta_node.bias
+      of max:
+        let (first_weight, first_from_id) = input_node_index_and_weight[0]
+        var max_tensor = first_weight * compute_node_value(first_from_id, next_visited)
+        for idx in 1 ..< input_node_index_and_weight.len:
+          let (weight, local_from_node_id) = input_node_index_and_weight[idx]
+          max_tensor = tensor_max(max_tensor, weight * compute_node_value(local_from_node_id, next_visited))
+        node_value = max_tensor +. meta_node.bias
+      of min:
+        let (first_weight, first_from_id) = input_node_index_and_weight[0]
+        var min_tensor = first_weight * compute_node_value(first_from_id, next_visited)
+        for idx in 1 ..< input_node_index_and_weight.len:
+          let (weight, local_from_node_id) = input_node_index_and_weight[idx]
+          min_tensor = tensor_min(min_tensor, weight * compute_node_value(local_from_node_id, next_visited))
+        node_value = min_tensor +. meta_node.bias
+      of mean:
+        var sum_tensor = zeros[float32](one_input_shape)
+        for entry in input_node_index_and_weight:
+          let (weight, local_from_node_id) = entry
+          sum_tensor += weight * compute_node_value(local_from_node_id, next_visited)
+        node_value = (sum_tensor /. input_node_index_and_weight.len.float32) +. meta_node.bias
 
     # activation
 
@@ -864,6 +940,7 @@ proc evaluate_nn_exec_trace(
       i,
       input_node.activation.ord,
       0.0'f32,
+      input_node.aggregation.ord,
       @[(1.0'f32, node_index, -1)]
     ))
 
@@ -879,6 +956,17 @@ proc evaluate_nn_exec_trace(
       return
 
     let meta_node = nn.meta_nodes[index]
+
+    if meta_node.disabled:
+      finished[index] = 1
+      trace.add((
+        index,
+        Activation.identity.ord,
+        0.0'f32,
+        Aggregation.sum.ord,
+        @[]
+      ))
+      return
 
     # start with bias
 
@@ -929,6 +1017,7 @@ proc evaluate_nn_exec_trace(
       index,
       meta_node.activation.ord,
       meta_node.bias,
+      meta_node.aggregation.ord,
       multiplies
     ))
 
@@ -970,13 +1059,44 @@ proc evaluate_nn_with_trace(
   values &= seq_inputs_tensor
 
   for update_node in trace:
-    let (to_id, act_index, bias, incoming_weights) = update_node
+    let (to_id, act_index, bias, agg_index, incoming_weights) = update_node
+    let agg = Aggregation(agg_index)
 
-    values[to_id] = values[to_id] +. bias
-
-    for incoming_weight in incoming_weights:
-      let (weight, from_id, _) = incoming_weight
-      values[to_id] += weight * values[from_id]
+    if incoming_weights.len == 0:
+      values[to_id] = zeros[float32](one_input_shape) +. bias
+    else:
+      case agg
+      of sum:
+        values[to_id] = zeros[float32](one_input_shape) +. bias
+        for incoming_weight in incoming_weights:
+          let (weight, from_id, _) = incoming_weight
+          values[to_id] += weight * values[from_id]
+      of product:
+        var prod_tensor = ones[float32](one_input_shape)
+        for incoming_weight in incoming_weights:
+          let (weight, from_id, _) = incoming_weight
+          prod_tensor = tensor_mul(prod_tensor, weight * values[from_id])
+        values[to_id] = prod_tensor +. bias
+      of max:
+        let (first_weight, first_from_id, _) = incoming_weights[0]
+        var max_tensor = first_weight * values[first_from_id]
+        for idx in 1 ..< incoming_weights.len:
+          let (weight, from_id, _) = incoming_weights[idx]
+          max_tensor = tensor_max(max_tensor, weight * values[from_id])
+        values[to_id] = max_tensor +. bias
+      of min:
+        let (first_weight, first_from_id, _) = incoming_weights[0]
+        var min_tensor = first_weight * values[first_from_id]
+        for idx in 1 ..< incoming_weights.len:
+          let (weight, from_id, _) = incoming_weights[idx]
+          min_tensor = tensor_min(min_tensor, weight * values[from_id])
+        values[to_id] = min_tensor +. bias
+      of mean:
+        var sum_tensor = zeros[float32](one_input_shape)
+        for incoming_weight in incoming_weights:
+          let (weight, from_id, _) = incoming_weight
+          sum_tensor += weight * values[from_id]
+        values[to_id] = (sum_tensor /. incoming_weights.len.float32) +. bias
 
     values[to_id] = Activation(act_index).activate(values[to_id])
 
@@ -984,7 +1104,7 @@ proc evaluate_nn_with_trace(
 
   return seq_outputs.map(tensor => tensor.to_seq)
 
-proc evaluate_nn_single(
+proc evaluate_nn_single*(
   top_id: int,
   nn_id: int,
   inputs: seq[float32],
@@ -992,7 +1112,6 @@ proc evaluate_nn_single(
 ): seq[float32] {.exportpy.} =
 
   let seq_inputs = inputs.map(value => @[value])
-
   let top = topologies[top_id]
   let nn = top.population[nn_id]
 
@@ -1005,6 +1124,36 @@ proc evaluate_nn_single(
     evaluate_nn(top_id, nn_id, seq_inputs)
 
   return outputs.map(tensor => tensor[0])
+
+template aggregate_scalar(agg: Aggregation, bias: float32, length: int, idx_var, term_expr: untyped): float32 =
+  if length == 0:
+    bias
+  else:
+    case agg
+    of sum:
+      var s = 0.0'f32
+      for idx_var in 0 ..< length: s += term_expr
+      bias + s
+    of product:
+      var p = 1.0'f32
+      for idx_var in 0 ..< length: p *= term_expr
+      bias + p
+    of max:
+      var m = low(float32)
+      for idx_var in 0 ..< length:
+        let v = term_expr
+        if v > m: m = v
+      bias + m
+    of min:
+      var m = high(float32)
+      for idx_var in 0 ..< length:
+        let v = term_expr
+        if v < m: m = v
+      bias + m
+    of mean:
+      var s = 0.0'f32
+      for idx_var in 0 ..< length: s += term_expr
+      bias + (s / length.float32)
 
 var thread_local_values {.threadvar.}: seq[float32]
 
@@ -1024,18 +1173,19 @@ proc evaluate_nn_single_with_trace_thread_fn(
   if thread_local_values.len < req_len:
     thread_local_values.setLen(req_len)
 
+  for i in 0 ..< num_nodes:
+    thread_local_values[i] = 0.0'f32
+
   # copy inputs to the end of the buffer
   for i in 0 ..< num_inputs:
     thread_local_values[num_nodes + i] = buffer_input[i]
 
   for update_node in trace_updates:
-    let (to_id, act_index, bias, incoming_weights) = update_node
+    let (to_id, act_index, bias, agg_index, incoming_weights) = update_node
 
-    var current_val = bias
-
-    for incoming_weight in incoming_weights:
-      let (weight, from_id, _) = incoming_weight
-      current_val += weight * thread_local_values[from_id]
+    let current_val = aggregate_scalar(Aggregation(agg_index), bias, incoming_weights.len, j,
+      incoming_weights[j].weight * thread_local_values[incoming_weights[j].from_node_id]
+    )
 
     thread_local_values[to_id] = Activation(act_index).activate(current_val)
 
@@ -1136,11 +1286,18 @@ proc activate(
     return sin(input)
   elif act == abs:
     return abs(input)
+  elif act == cos:
+    return cos(input)
 
 proc rand_activation(): Activation =
   let activations = Activation.to_seq
   let rand_activation_index = rand(Activation.high.ord)
   result = activations[rand_activation_index]
+
+proc rand_aggregation*(): Aggregation =
+  let aggregations = Aggregation.to_seq
+  let rand_aggregation_index = rand(Aggregation.high.ord)
+  result = aggregations[rand_aggregation_index]
 
 proc d_activate(act: Activation, x: float32, y: float32): float32 =
   case act
@@ -1152,6 +1309,7 @@ proc d_activate(act: Activation, x: float32, y: float32): float32 =
   of elu:      (if x >= 0.0: 1.0'f32 else: y + 1.0)
   of gauss:    -2.0 * x * y
   of sin:      cos(x)
+  of cos:      -sin(x)
   of abs:      (if x > 0.0: 1.0'f32 elif x < 0.0: -1.0'f32 else: 0.0'f32)
 
 proc backprop_nn_single*(
@@ -1180,9 +1338,9 @@ proc backprop_nn_single*(
   # forward
 
   for node in et.node_updates:
-    var z = node.bias
-    for edge in node.trace:
-      z += edge.weight * values[edge.from_node_id]
+    let z = aggregate_scalar(Aggregation(node.aggregation_id), node.bias, node.trace.len, j,
+      node.trace[j].weight * values[node.trace[j].from_node_id]
+    )
     pre_act[node.to_node_id] = z
     values[node.to_node_id] = Activation(node.activation_id).activate(z)
 
@@ -1201,19 +1359,52 @@ proc backprop_nn_single*(
 
     let act = Activation(node.activation_id)
     let g = grad[node.to_node_id] * d_activate(act, pre_act[node.to_node_id], values[node.to_node_id])
+    let max_mag = top.mutation_hyper_params.max_weight_magnitude.float32
 
-    node.bias -= learning_rate * g
-    nn.meta_nodes[node.to_node_id].bias = node.bias
+    if not nn.meta_nodes[node.to_node_id].frozen:
+      node.bias = max(min(node.bias - learning_rate * g, max_mag), -max_mag)
+      nn.meta_nodes[node.to_node_id].bias = node.bias
 
-    for j in 0 ..< node.trace.len:
+    template update_edge(j: int, factor: float32 = 1.0'f32): untyped =
       template edge: untyped = et.node_updates[i].trace[j]
-
-      grad[edge.from_node_id] += g * edge.weight
-
-      if edge.meta_edge_index >= 0:
-        let w = edge.weight - learning_rate * g * values[edge.from_node_id]
+      grad[edge.from_node_id] += g * edge.weight * factor
+      if edge.meta_edge_index >= 0 and not nn.meta_edges[edge.meta_edge_index].frozen:
+        let w = max(min(edge.weight - learning_rate * g * values[edge.from_node_id] * factor, max_mag), -max_mag)
         edge.weight = w
         nn.meta_edges[edge.meta_edge_index].weight = w
+
+    let agg = Aggregation(node.aggregation_id)
+    case agg
+    of sum:
+      for j in 0 ..< node.trace.len:
+        update_edge(j)
+    of mean:
+      let n_inv = 1.0'f32 / max(node.trace.len.float32, 1.0'f32)
+      for j in 0 ..< node.trace.len:
+        update_edge(j, n_inv)
+    of max, min:
+      if node.trace.len > 0:
+        var best_idx = 0
+        var best_val = node.trace[0].weight * values[node.trace[0].from_node_id]
+        for j in 1 ..< node.trace.len:
+          let v = node.trace[j].weight * values[node.trace[j].from_node_id]
+          if (agg == max and v > best_val) or (agg == min and v < best_val):
+            best_val = v
+            best_idx = j
+        update_edge(best_idx)
+    of product:
+      let tlen = node.trace.len
+      if tlen > 0:
+        var prefix = new_seq[float32](tlen)
+        var suffix = new_seq[float32](tlen)
+        prefix[0] = 1.0'f32
+        for j in 1 ..< tlen:
+          prefix[j] = prefix[j - 1] * (node.trace[j - 1].weight * values[node.trace[j - 1].from_node_id])
+        suffix[tlen - 1] = 1.0'f32
+        for j in countdown(tlen - 2, 0):
+          suffix[j] = suffix[j + 1] * (node.trace[j + 1].weight * values[node.trace[j + 1].from_node_id])
+        for j in 0 ..< tlen:
+          update_edge(j, prefix[j] * suffix[j])
 
 # mutation and crossover
 
@@ -1356,7 +1547,7 @@ proc select_and_tournament(
 
     for top_id in top_ids:
       let top = topologies[top_id]
-      let selected = selected_sorted_indices.map(index => top.population[index + offset])
+      let selected = selected_sorted_indices.map(index => top.population[index + offset].clone())
 
       for i in 0 ..< num_selected_per_island:
         top.population[offset + i] = selected[i]
@@ -1416,18 +1607,18 @@ proc mutate_weights*(
         body
         idx += sample_waiting_time(rate)
 
-  # mutating node biases
+  # mutating node biases (only non-input nodes use biases in forward evaluation)
 
-  for i in 0 ..< meta_nodes_len:
+  for i in nn.num_inputs ..< meta_nodes_len:
     let node = nn.meta_nodes[i]
     if node.disabled or node.frozen: continue
 
     if not hparams.use_fast_ga and satisfy_prob(hparams.change_node_bias_prob):
       perturb_value(node.bias, hparams.replace_node_bias_prob, bias_step.float, hparams.max_weight_magnitude)
 
-  if hparams.use_fast_ga:
-    fast_ga_loop(meta_nodes_len, hparams.fast_ga_beta, i):
-      let node = nn.meta_nodes[i]
+  if hparams.use_fast_ga and meta_nodes_len > nn.num_inputs:
+    fast_ga_loop(meta_nodes_len - nn.num_inputs, hparams.fast_ga_beta, rel_i):
+      let node = nn.meta_nodes[nn.num_inputs + rel_i]
       if not node.disabled and not node.frozen:
         perturb_value(node.bias, hparams.replace_node_bias_prob, bias_step.float, hparams.max_weight_magnitude)
 
@@ -1496,6 +1687,10 @@ proc mutate_structure*(
       node.activation = rand_activation()
       mutated = true
 
+    if node.can_change_aggregation and satisfy_prob(hparams.change_aggregation_prob):
+      node.aggregation = rand_aggregation()
+      mutated = true
+
   # mutating edges: enable/disable toggle
 
   for i in 0 ..< meta_edges_len:
@@ -1531,7 +1726,9 @@ proc mutate_structure*(
       let new_node_id = add_node(top)
       let new_meta_node = MetaNode(
         topology_id: top.id, node_id: new_node_id, can_disable: true, disabled: false,
-        activation: if coin_flip(): relu else: sigmoid, can_change_activation: coin_flip(),
+        activation: if coin_flip(): relu else: sigmoid,
+        can_change_activation: true,
+        can_change_aggregation: true, aggregation: sum,
         frozen: false
       )
       let new_local_node_id = nn.meta_nodes.len
@@ -1574,16 +1771,37 @@ proc mutate_structure*(
         edge_id2 = add_edge(top, node_id, edge.to_node_id)
         top.edge_splits[meta_edge.edge_id] = (node_id, edge_id1, edge_id2)
 
-      let new_local_node_id = nn.meta_nodes.len
-      nn.meta_nodes.add(MetaNode(
-        topology_id: top.id, node_id: node_id, can_disable: true,
-        activation: if coin_flip(): relu else: sigmoid, can_change_activation: coin_flip(),
-        frozen: false
-      ))
-      node_index[node_id] = new_local_node_id
+      var new_local_node_id: int
+      if node_index.has_key(node_id):
+        new_local_node_id = node_index[node_id]
+        if not nn.meta_nodes[new_local_node_id].frozen:
+          nn.meta_nodes[new_local_node_id].disabled = false
+      else:
+        new_local_node_id = nn.meta_nodes.len
+        nn.meta_nodes.add(MetaNode(
+          topology_id: top.id, node_id: node_id, can_disable: true,
+          activation: if coin_flip(): relu else: sigmoid,
+          can_change_activation: true,
+          can_change_aggregation: true, aggregation: sum,
+          frozen: false
+        ))
+        node_index[node_id] = new_local_node_id
 
-      add_meta_edge(edge_id1, meta_edge.local_from_node_id, new_local_node_id, 1.0)
-      add_meta_edge(edge_id2, new_local_node_id, meta_edge.local_to_node_id, meta_edge.weight)
+      if edge_index.has_key(edge_id1):
+        let e1 = nn.meta_edges[edge_index[edge_id1]]
+        if not e1.frozen:
+          e1.disabled = false
+          e1.weight = 1.0
+      else:
+        add_meta_edge(edge_id1, meta_edge.local_from_node_id, new_local_node_id, 1.0)
+
+      if edge_index.has_key(edge_id2):
+        let e2 = nn.meta_edges[edge_index[edge_id2]]
+        if not e2.frozen:
+          e2.disabled = false
+          e2.weight = meta_edge.weight
+      else:
+        add_meta_edge(edge_id2, new_local_node_id, meta_edge.local_to_node_id, meta_edge.weight)
       mutated = true
 
   template do_add_novel_edge() =
@@ -1771,6 +1989,9 @@ proc crossover(
       disjoint_node_ids = (parent1_node_set - parent2_node_set).to_seq
       disjoint_edge_ids = (parent1_edge_set - parent2_edge_set).to_seq
 
+    disjoint_node_ids.sort()
+    disjoint_edge_ids.sort()
+
   # new child node index
 
   var child_node_index = init_table[int, int]()
@@ -1794,9 +2015,9 @@ proc crossover(
     if not new_node.frozen and (parent1_node.disabled or parent2_node.disabled):
       new_node.disabled = satisfy_prob(hyper_params.prob_child_disabled_given_parent_cond)
 
-    # some of the time, do not inherit disabled genes
+    # some of the time, do not inherit disabled genes (only for removable hidden nodes)
 
-    if not new_node.frozen and satisfy_prob(hyper_params.prob_remove_disabled_node) and new_node.disabled:
+    if new_node.can_disable and not new_node.frozen and satisfy_prob(hyper_params.prob_remove_disabled_node) and new_node.disabled:
       continue
 
     child_node_index[new_node.node_id] = child_nodes.len
@@ -1809,6 +2030,9 @@ proc crossover(
 
     let new_node = MetaNode()
     new_node[] = disjoint_node[]
+
+    if new_node.can_disable and not new_node.frozen and satisfy_prob(hyper_params.prob_remove_disabled_node) and new_node.disabled:
+      continue
 
     child_node_index[new_node.node_id] = child_nodes.len
     child_nodes.add(new_node)
@@ -2049,9 +2273,11 @@ proc set_frozen*(
   for nn in top.population:
     for node in nn.meta_nodes:
       if node.node_id notin exempt_node_ids:
+        let is_hidden = top.nodes_index.has_key(node.node_id) and top.nodes_index[node.node_id].`type` == NodeType.hidden
         node.frozen = frozen
-        node.can_disable = not frozen
-        node.can_change_activation = not frozen
+        node.can_disable = (not frozen) and is_hidden
+        node.can_change_activation = (not frozen) and is_hidden
+        node.can_change_aggregation = (not frozen) and is_hidden
     for edge in nn.meta_edges:
       let top_edge = top.edges[edge.edge_id]
       if top_edge.to_node_id notin exempt_node_ids:
@@ -2070,9 +2296,11 @@ proc set_frozen_subset*(
   for nn in top.population:
     for node in nn.meta_nodes:
       if node.node_id in node_set:
+        let is_hidden = top.nodes_index.has_key(node.node_id) and top.nodes_index[node.node_id].`type` == NodeType.hidden
         node.frozen = frozen
-        node.can_disable = not frozen
-        node.can_change_activation = not frozen
+        node.can_disable = (not frozen) and is_hidden
+        node.can_change_activation = (not frozen) and is_hidden
+        node.can_change_aggregation = (not frozen) and is_hidden
     for edge in nn.meta_edges:
       if edge.edge_id in edge_set:
         edge.frozen = frozen
@@ -2147,30 +2375,34 @@ proc reset_top_islands*(
   if all_top_ids.len > 0:
     let first_top = topologies[all_top_ids[0]]
     let num_islands = first_top.num_islands
-    if num_islands > 1:
+    let actual_reset = min(num_islands_to_reset, num_islands - 1)
+    if num_islands > 1 and actual_reset > 0:
       let pop_size = first_top.pop_size
       let island_pop_size = pop_size div num_islands
 
       var island_avgs: seq[(float32, int)] = @[]
+      var sorted_island_fits = new_seq[seq[float32]](num_islands)
       for i in 0 ..< num_islands:
         let offset = i * island_pop_size
-        let island_fits = fitnesses[offset ..< offset + island_pop_size]
+        var island_fits = fitnesses[offset ..< offset + island_pop_size]
         var sum: float32 = 0.0
         for f in island_fits: sum += f
         island_avgs.add((sum / island_pop_size.float32, i))
+        island_fits.sort(order = SortOrder.Descending)
+        sorted_island_fits[i] = island_fits
 
       island_avgs.sort(proc (x, y: (float32, int)): int = cmp(x[0], y[0]))
 
-      let reset_island_ids = island_avgs[0 ..< num_islands_to_reset].map(x => x[1])
-      let survivor_island_ids = island_avgs[num_islands_to_reset .. ^1].map(x => x[1])
+      let reset_island_ids = island_avgs[0 ..< actual_reset].map(x => x[1])
+      let survivor_island_ids = island_avgs[actual_reset .. ^1].map(x => x[1])
 
-      var global_survivor_indices: seq[int] = @[]
+      var global_survivors: seq[(int, float32)] = @[]
       let num_selected_per_island = max(2, (first_top.selection_hyper_params.frac_natural_selected * island_pop_size.float).int)
 
       for island_id in survivor_island_ids:
         let offset = island_id * island_pop_size
         for j in 0 ..< num_selected_per_island:
-          global_survivor_indices.add(offset + j)
+          global_survivors.add((offset + j, sorted_island_fits[island_id][j]))
 
       for island_id in reset_island_ids:
         let offset = island_id * island_pop_size
@@ -2180,21 +2412,25 @@ proc reset_top_islands*(
           var f1, f2: float32 = low(float32)
 
           for _ in 0 ..< tournament_size:
-            let idx = global_survivor_indices[rand(global_survivor_indices.len - 1)]
-            let fit = fitnesses[idx]
+            let (idx, fit) = global_survivors[rand(global_survivors.len - 1)]
             if fit > f1:
               p2 = p1; f2 = f1
               p1 = idx; f1 = fit
             elif fit > f2:
               p2 = idx; f2 = fit
 
-          if p1 < 0: p1 = global_survivor_indices[0]
-          if p2 < 0: p2 = p1
+          if p1 < 0:
+            p1 = global_survivors[0][0]
+            f1 = global_survivors[0][1]
+          if p2 < 0:
+            p2 = p1
+            f2 = f1
 
           for top_id in all_top_ids:
             let top = topologies[top_id]
             let child = crossover(top, p1, p2, f1, f2)
             top.population[nn_id] = child
+            mutate(top, nn_id)
 
       for top_id in all_top_ids:
         set_population_exec_trace(top_id)
