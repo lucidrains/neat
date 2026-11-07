@@ -8,3 +8,5 @@ from neat.neat import (
     get_population_modularity_q
 )
 
+from neat.baldwin import BaldwinNEAT, PredictiveCodingMemory
+
