@@ -19,10 +19,12 @@ from neat.neat_nim import (
     add_node,
     add_topology,
     backprop_nn_single,
+    backprop_nn_single_buf,
     clone_nn,
     clone_nn_obj,
     crossover_and_add_to_population,
     evaluate_nn_single,
+    evaluate_nn_single_into,
     evaluate_population,
     get_population_complexities,
     get_population_json,
@@ -64,6 +66,42 @@ def default(v, d):
 
 def divisible_by(num, den):
     return (num % den) == 0
+
+def unwrap_nim_fn(fn):
+    # nimporter wraps exported procs to coerce buffer args, the buffer api handles this itself
+    if not getattr(fn, '_is_nim_wrapped', False) or not exists(fn.__closure__):
+        return fn
+    return fn.__closure__[0].cell_contents
+
+evaluate_population = unwrap_nim_fn(evaluate_population)
+evaluate_nn_single_into = unwrap_nim_fn(evaluate_nn_single_into)
+backprop_nn_single_buf = unwrap_nim_fn(backprop_nn_single_buf)
+
+def to_float32_array(state):
+    if isinstance(state, np.ndarray):
+        return state.astype(np.float32, copy = False), False
+
+    if torch.is_tensor(state):
+        return state.detach().cpu().numpy().astype(np.float32, copy = False), True
+
+    state = tree_map_tensor(lambda t: t.detach().cpu().numpy(), state)
+    return np.asarray(state, dtype = np.float32), False
+
+def to_contiguous_float32(arr):
+    if isinstance(arr, np.ndarray) and arr.dtype == np.float32 and arr.flags.c_contiguous:
+        return arr
+    return np.ascontiguousarray(arr, dtype = np.float32)
+
+def slice_head(out, head):
+    if not exists(head):
+        return out
+
+    if isinstance(head, tuple):
+        head = slice(*head)
+    elif isinstance(head, int):
+        head = slice(head, head + 1)
+
+    return slice_at_dim(out, head, dim = -1)
 
 def log(t, eps = 1e-20):
     return np.log(np.clip(t, a_min = eps, a_max = None))
@@ -436,6 +474,7 @@ class NEAT(GeneticAlgorithm):
         self.time_dim = {'raw': 1, 'sin_cos': 2, None: 0}[time_mode]
         self.time = 0.0
         self.output = np.empty((pop_size, dim_out + num_recurrent), dtype = np.float32)
+        self.single_output = np.empty(dim_out + num_recurrent, dtype = np.float32)
         self.recurrent_state = None
         self.single_recurrent_state = None
 
@@ -491,9 +530,7 @@ class NEAT(GeneticAlgorithm):
         if exists(task):
             return self.router.single_forward(index, state, task, sample = sample, temperature = temperature)
 
-        is_torch = torch.is_tensor(state)
-        state = tree_map_tensor(lambda t: t.detach().cpu().numpy(), state)
-        state = np.asarray(state, dtype = np.float32)
+        state, is_torch = to_float32_array(state)
 
         has_recurrent = self.num_recurrent > 0
         t = default(time, self.time)
@@ -507,22 +544,21 @@ class NEAT(GeneticAlgorithm):
 
         self.time = t + dt
 
-        logits = np.array(evaluate_nn_single(self.top.id, index, state.tolist(), use_exec_cache = True), dtype = np.float32)
+        evaluate_nn_single_into(self.top.id, index, to_contiguous_float32(state), self.single_output)
 
+        output = self.single_output
         if has_recurrent:
-            logits, self.single_recurrent_state = logits[:-self.num_recurrent], logits[-self.num_recurrent:].copy()
+            logits = output[:-self.num_recurrent].copy()
+            self.single_recurrent_state = output[-self.num_recurrent:].copy()
+        else:
+            logits = output if sample else output.copy()
 
-        if exists(head):
-            head = slice(*head) if isinstance(head, tuple) else (slice(head, head + 1) if isinstance(head, int) else head)
-            logits = slice_at_dim(logits, head, dim = -1)
+        logits = slice_head(logits, head)
 
         if is_torch:
             logits = torch.from_numpy(logits)
 
-        if not sample:
-            return logits
-
-        return gumbel_sample(logits, temperature = temperature)
+        return gumbel_sample(logits, temperature = temperature) if sample else logits
 
     def forward(
         self,
@@ -537,9 +573,7 @@ class NEAT(GeneticAlgorithm):
         if exists(task):
             return self.router.forward(state, task, sample = sample, temperature = temperature)
 
-        is_torch = torch.is_tensor(state)
-        state = tree_map_tensor(lambda t: t.detach().cpu().numpy(), state)
-        state = np.asarray(state, dtype = np.float32)
+        state, is_torch = to_float32_array(state)
 
         has_recurrent = self.num_recurrent > 0
         t = default(time, self.time)
@@ -555,26 +589,18 @@ class NEAT(GeneticAlgorithm):
 
         self.time = t + dt
 
-        input = np.ascontiguousarray(state, dtype = np.float32)
-
-        evaluate_population(self.top.id, input, self.output)
+        evaluate_population(self.top.id, to_contiguous_float32(state), self.output)
 
         out = self.output
-
         if has_recurrent:
             out, self.recurrent_state = out[:, :-self.num_recurrent], out[:, -self.num_recurrent:].copy()
 
-        if exists(head):
-            head = slice(*head) if isinstance(head, tuple) else (slice(head, head + 1) if isinstance(head, int) else head)
-            out = slice_at_dim(out, head, dim = -1)
+        out = slice_head(out, head)
 
         if is_torch:
             out = torch.from_numpy(out)
 
-        if not sample:
-            return out
-
-        return gumbel_sample(out, temperature = temperature)
+        return gumbel_sample(out, temperature = temperature) if sample else out
 
     def backprop(
         self,
@@ -583,11 +609,14 @@ class NEAT(GeneticAlgorithm):
         target,
         learning_rate: float = 0.01
     ):
-        backprop_nn_single(
+        state, _ = to_float32_array(state)
+        target, _ = to_float32_array(target)
+
+        backprop_nn_single_buf(
             self.top.id,
             index,
-            state.tolist(),
-            target.tolist(),
+            to_contiguous_float32(state),
+            to_contiguous_float32(target),
             learning_rate
         )
 
