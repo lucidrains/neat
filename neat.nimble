@@ -1,6 +1,7 @@
 # Package
 
-version = "0.0.6"
+# mirror of neat/__init__.py::__version__ - nimble requires a literal, keep in sync with `just bump <version>`
+version = "0.0.16"
 author        = "lucidrains"
 description   = "neat"
 license       = "MIT"

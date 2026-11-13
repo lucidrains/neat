@@ -6,7 +6,10 @@ test-xor:
 train-lunar-fuss:
 	uv run train_lunar.py --use_fuss=True --fuss_eps=1e-5
 
-# sync the version across pyproject.toml and neat.nimble
+# bump the version in neat/__init__.py (the source of truth) and mirror it into neat.nimble
 
 bump version:
 	python3 bump.py {{version}}
+
+bump-check:
+	python3 bump.py --check

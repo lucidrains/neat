@@ -166,25 +166,29 @@ class VecSnakeEnv:
 
         oob = (new_head_x < 0) | (new_head_x >= self.grid_size) | (new_head_y < 0) | (new_head_y >= self.grid_size)
 
+        ate_food = (new_head_x == self.food[:, 0]) & (new_head_y == self.food[:, 1])
+
+        # tail vacates unless eating -> occupied len
+        occupied_len = self.snake_length - (~ate_food).astype(np.int32)
         match = (self.snake[:, :, 0] == new_head_x[:, None]) & (self.snake[:, :, 1] == new_head_y[:, None])
-        valid_mask = np.arange(self.max_len)[None, :] < self.snake_length[:, None]
+        valid_mask = np.arange(self.max_len)[None, :] < occupied_len[:, None]
         self_collision = (match & valid_mask).any(axis=1)
 
         terminated = oob | self_collision
-        truncated = self.steps >= self._max_steps
-
-        ate_food = (new_head_x == self.food[:, 0]) & (new_head_y == self.food[:, 1])
 
         new_snake = np.zeros_like(self.snake)
         new_snake[:, 1:] = self.snake[:, :-1]
         new_snake[:, 0] = new_head
 
         should_update_snake = update_mask & ~terminated
+        new_length = self.snake_length + ate_food.astype(np.int32)
+        won = should_update_snake & (new_length >= self.max_len)
+        truncated = (self.steps >= self._max_steps) | won
 
         self.snake = np.where(should_update_snake[:, None, None], new_snake, self.snake)
-        self.snake_length = np.where(should_update_snake, self.snake_length + ate_food.astype(np.int32), self.snake_length)
+        self.snake_length = np.where(should_update_snake, new_length, self.snake_length)
 
-        needs_food_mask = should_update_snake & ate_food
+        needs_food_mask = should_update_snake & ate_food & ~won
         self._place_food_vectorized(needs_food_mask)
 
         reward = np.zeros(self.num_envs, dtype=np.float32)
@@ -229,11 +233,15 @@ def train(
     num_generations: int = 2000,
     pop_size: int = 1000,
 
+    # network
+    num_hiddens: int = 16,
+
     # intervals
     record_every: int = 25,
     save_population_every: int = 100,
 
     # environment parameters
+    grid_size: int = 4,
     start_max_episode_len: int = 40,
     end_max_episode_len: int = 40,
     curriculum_generations: int = 200,
@@ -409,7 +417,7 @@ def train(
     num_actions = 4
 
     population = NEAT(
-        dim_state, 16, num_actions,
+        dim_state, num_hiddens, num_actions,
         pop_size = pop_size,
         **evolution_hyper_params
     )
@@ -496,7 +504,7 @@ def train(
         pbar.set_description(f'C: {mean_complexity:.1f} | N: {nodes} E: {edges} | fitness: max {max_fit:.2f} | mean {mean_fit:.2f}')
 
         if divisible_by(gen + 1, record_every):
-            record_agent_(0)
+            record_agent_(population.champion_index)
             num_recorded += 1
 
         if divisible_by(gen + 1, save_population_every):

@@ -1,3 +1,6 @@
+# single source of truth for the version - bump with `just bump <version>`
+__version__ = "0.0.16"
+
 from neat.neat import (
     NEAT,
     Topology,

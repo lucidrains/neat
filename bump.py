@@ -1,28 +1,46 @@
 import re
 import sys
+from pathlib import Path
 
-VERSION_PATTERN = r'version\s*=\s*"([^"]+)"'
-MANIFESTS = ['pyproject.toml', 'neat.nimble']
+# neat/__init__.py is the source of truth, neat.nimble is a mirror (nimble requires a literal)
+CANONICAL = Path('neat/__init__.py')
+MIRRORS = [Path('neat.nimble')]
 
-def set_version(path, version):
-    with open(path) as f:
-        content = f.read()
+def read_version(path, name):
+    match = re.search(rf'(?m)^{name}\s*=\s*"([^"]+)"', path.read_text())
 
-    updated = re.sub(VERSION_PATTERN, f'version = "{version}"', content, count = 1)
+    if not match:
+        raise SystemExit(f'{name} not found in {path}')
 
-    if updated == content:
-        raise SystemExit(f'version not found in {path}')
+    return match.group(1)
 
-    with open(path, 'w') as f:
-        f.write(updated)
+def set_version(path, name, version):
+    text = path.read_text()
+    updated, count = re.subn(rf'(?m)^{name}\s*=\s*"[^"]+"', f'{name} = "{version}"', text, count = 1)
+
+    if count != 1:
+        raise SystemExit(f'{name} not found in {path}')
+
+    path.write_text(updated)
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        raise SystemExit('usage: python3 bump.py <version>')
+    if len(sys.argv) == 2 and sys.argv[1] == '--check':
+        version = read_version(CANONICAL, '__version__')
+        stale = [str(path) for path in MIRRORS if read_version(path, 'version') != version]
+
+        if stale:
+            raise SystemExit(f'version {version} out of sync in {", ".join(stale)}')
+
+        print(f'version {version} in sync')
+        sys.exit(0)
+    elif len(sys.argv) != 2:
+        raise SystemExit('usage: python3 bump.py <version> | --check')
 
     version = sys.argv[1]
 
-    for path in MANIFESTS:
-        set_version(path, version)
+    set_version(CANONICAL, '__version__', version)
 
-    print(f'version {version} set in {", ".join(MANIFESTS)}')
+    for path in MIRRORS:
+        set_version(path, 'version', version)
+
+    print(f'version {version} set in {CANONICAL} (pyproject reads it dynamically), mirrored to {", ".join(map(str, MIRRORS))}')

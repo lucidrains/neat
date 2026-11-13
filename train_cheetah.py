@@ -170,19 +170,6 @@ def train(
     rmtree(recording_folder, ignore_errors = True)
     rmtree(recorded_population_folder, ignore_errors = True)
 
-    rec_env = gym.make(
-        env_name,
-        render_mode = 'rgb_array'
-    )
-
-    rec_env = gym.wrappers.RecordVideo(
-        env = rec_env,
-        video_folder = recording_folder,
-        name_prefix = 'cheetah-video',
-        episode_trigger = lambda eps_num: True,
-        disable_logger = True
-    )
-
     num_recorded = 0
 
     def record_agent_(
@@ -190,6 +177,19 @@ def train(
         seed = None
     ):
         nonlocal num_recorded
+
+        rec_env = gym.make(
+            env_name,
+            render_mode = 'rgb_array'
+        )
+
+        rec_env = gym.wrappers.RecordVideo(
+            env = rec_env,
+            video_folder = recording_folder,
+            name_prefix = f'cheetah-video-{num_recorded}',
+            episode_trigger = lambda eps_num: True,
+            disable_logger = True
+        )
 
         state, _ = rec_env.reset(seed = seed)
 
@@ -206,7 +206,7 @@ def train(
         rec_env.close()
 
         video = wandb.Video(
-            f'{recording_folder}/cheetah-video-episode-{num_recorded}.mp4',
+            f'{recording_folder}/cheetah-video-{num_recorded}-episode-0.mp4',
             format = 'gif'
         )
 
